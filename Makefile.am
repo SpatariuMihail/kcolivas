@@ -84,6 +84,10 @@ if HAS_AVALON
 cgminer_SOURCES += driver-avalon.c driver-avalon.h
 endif
 
+if HAS_BITMAIN
+cgminer_SOURCES += driver-bitmain.c driver-bitmain.h
+endif
+
 if HAS_MODMINER
 cgminer_SOURCES += driver-modminer.c
 bitstreamsdir = $(bindir)/bitstreams

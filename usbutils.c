@@ -50,6 +50,10 @@
 #define DRV_AVALON 6
 #endif
 
+#ifdef USE_BITMAIN
+#define DRV_BITMAIN 7
+#endif
+
 #define DRV_LAST -1
 
 #define USB_CONFIG 1
@@ -59,12 +63,14 @@
 #define BITFORCE_TIMEOUT_MS 999
 #define MODMINER_TIMEOUT_MS 999
 #define AVALON_TIMEOUT_MS 999
+#define BITMAIN_TIMEOUT_MS 999
 #define ICARUS_TIMEOUT_MS 999
 #else
 #define BFLSC_TIMEOUT_MS 300
 #define BITFORCE_TIMEOUT_MS 200
 #define MODMINER_TIMEOUT_MS 100
 #define AVALON_TIMEOUT_MS 200
+#define BITMAIN_TIMEOUT_MS 200
 #define ICARUS_TIMEOUT_MS 200
 #endif
 
@@ -95,6 +101,17 @@ static struct usb_endpoints mmq_eps[] = {
 
 #ifdef USE_AVALON
 static struct usb_endpoints ava_eps[] = {
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(1), 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(2), 0 }
+};
+#endif
+
+#ifdef USE_BITMAIN
+static struct usb_endpoints bmm_eps[] = {
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(1), 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(2), 0 }
+};
+static struct usb_endpoints bms_eps[] = {
 	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(1), 0 },
 	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(2), 0 }
 };
@@ -219,6 +236,34 @@ static struct usb_find_devices find_dev[] = {
 		.epcount = ARRAY_SIZE(ava_eps),
 		.eps = ava_eps },
 #endif
+#ifdef USE_BITMAIN
+	{
+		.drv = DRV_BITMAIN,
+		.name = "BMM",
+		.ident = IDENT_BMM,
+		.idVendor = IDVENDOR_FTDI,
+		.idProduct = 0x6001,
+		.kernel = 0,
+		.config = 1,
+		.interface = 0,
+		.timeout = BITMAIN_TIMEOUT_MS,
+		.latency = 10,
+		.epcount = ARRAY_SIZE(bmm_eps),
+		.eps = bmm_eps },
+	{
+		.drv = DRV_BITMAIN,
+		.name = "BMS",
+		.ident = IDENT_BMS,
+		.idVendor = IDVENDOR_FTDI,
+		.idProduct = 0x6602,
+		.kernel = 0,
+		.config = 1,
+		.interface = 0,
+		.timeout = BITMAIN_TIMEOUT_MS,
+		.latency = 10,
+		.epcount = ARRAY_SIZE(bms_eps),
+		.eps = bms_eps },
+#endif
 #ifdef USE_ICARUS
 	{
 		.drv = DRV_ICARUS,
@@ -341,6 +386,10 @@ extern struct device_drv icarus_drv;
 
 #ifdef USE_AVALON
 extern struct device_drv avalon_drv;
+#endif
+
+#ifdef USE_BITMAIN
+extern struct device_drv bitmain_drv;
 #endif
 
 #define STRBUFLEN 256
@@ -548,6 +597,13 @@ static const char *C_AVALON_READ_S = "AvalonRead";
 static const char *C_GET_AVALON_READY_S = "AvalonReady";
 static const char *C_AVALON_RESET_S = "AvalonReset";
 static const char *C_GET_AVALON_RESET_S = "GetAvalonReset";
+static const char *C_BITMAIN_SEND_S = "BitMainSend";
+static const char *C_BITMAIN_READ_S = "BitMainRead";
+static const char *C_BITMAIN_TOKEN_TXCONFIG_S = "BitMainTokenTxConfig";
+static const char *C_BITMAIN_TOKEN_TXTASK_S = "BitMainTokenTxTask";
+static const char *C_BITMAIN_TOKEN_RXSTATUS_S = "BitMainTokenRxStatus";
+static const char *C_BITMAIN_DATA_RXSTATUS_S = "BitMainDataRxStatus";
+static const char *C_BITMAIN_DATA_RXNONCE_S = "BitMainDataRxNonce";
 static const char *C_FTDI_STATUS_S = "FTDIStatus";
 static const char *C_ENABLE_UART_S = "EnableUART";
 static const char *C_BB_SET_VOLTAGE_S = "SetCoreVoltage";
@@ -1038,6 +1094,13 @@ static void cgusb_check_init()
 		usb_commands[C_GET_AVALON_READY] = C_GET_AVALON_READY_S;
 		usb_commands[C_AVALON_RESET] = C_AVALON_RESET_S;
 		usb_commands[C_GET_AVALON_RESET] = C_GET_AVALON_RESET_S;
+		usb_commands[C_BITMAIN_SEND] = C_BITMAIN_SEND_S;
+		usb_commands[C_BITMAIN_READ] = C_BITMAIN_READ_S;
+		usb_commands[C_BITMAIN_TOKEN_TXCONFIG] = C_BITMAIN_TOKEN_TXCONFIG_S;
+		usb_commands[C_BITMAIN_TOKEN_TXTASK] = C_BITMAIN_TOKEN_TXTASK_S;
+		usb_commands[C_BITMAIN_TOKEN_RXSTATUS] = C_BITMAIN_TOKEN_RXSTATUS_S;
+		usb_commands[C_BITMAIN_DATA_RXSTATUS] = C_BITMAIN_DATA_RXSTATUS_S;
+		usb_commands[C_BITMAIN_DATA_RXNONCE] = C_BITMAIN_DATA_RXNONCE_S;
 		usb_commands[C_FTDI_STATUS] = C_FTDI_STATUS_S;
 		usb_commands[C_ENABLE_UART] = C_ENABLE_UART_S;
 		usb_commands[C_BB_SET_VOLTAGE] = C_BB_SET_VOLTAGE_S;
@@ -1927,6 +1990,11 @@ static struct usb_find_devices *usb_check(__maybe_unused struct device_drv *drv,
 #ifdef USE_AVALON
 	if (drv->drv_id == DRIVER_AVALON)
 		return usb_check_each(DRV_AVALON, drv, dev);
+#endif
+
+#ifdef USE_BITMAIN
+	if (drv->drv_id == DRIVER_BITMAIN)
+		return usb_check_each(DRV_BITMAIN, drv, dev);
 #endif
 
 	return NULL;
@@ -3129,6 +3197,7 @@ void usb_cleanup()
 			case DRIVER_MODMINER:
 			case DRIVER_ICARUS:
 			case DRIVER_AVALON:
+			case DRIVER_BITMAIN:
 				wr_lock(cgpu->usbinfo.devlock);
 				release_cgpu(cgpu);
 				wr_unlock(cgpu->usbinfo.devlock);
@@ -3280,6 +3349,12 @@ void usb_initialise()
 #ifdef USE_AVALON
 				if (!found && strcasecmp(ptr, avalon_drv.name) == 0) {
 					drv_count[avalon_drv.drv_id].limit = lim;
+					found = true;
+				}
+#endif
+#ifdef USE_BITMAIN
+				if (!found && strcasecmp(ptr, bitmain_drv.name) == 0) {
+					drv_count[bitmain_drv.drv_id].limit = lim;
 					found = true;
 				}
 #endif

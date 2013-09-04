@@ -245,6 +245,7 @@ You will have to copy "libusb-1.0.dll" to your working cgminer binary directory.
 --disable-adl           Override detection and disable building with adl
 --enable-bitforce       Compile support for BitForce FPGAs(default disabled)
 --enable-icarus         Compile support for Icarus Board(default disabled)
+--enable-bitmain        Compile support for BitMain Devices(default disabled)
 --enable-modminer       Compile support for ModMiner FPGAs(default disabled)
 --enable-ztex           Compile support for Ztex Board(default disabled)
 --enable-scrypt         Compile support for scrypt litecoin mining (default disabled)
