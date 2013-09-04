@@ -58,6 +58,10 @@
 #include "driver-avalon.h"
 #endif
 
+#ifdef USE_BITMAIN
+#include "driver-bitmain.h"
+#endif
+
 #ifdef USE_BFLSC
 #include "driver-bflsc.h"
 #endif
@@ -68,7 +72,7 @@
 	#include <sys/wait.h>
 #endif
 
-#if defined(USE_BITFORCE) || defined(USE_ICARUS) || defined(USE_AVALON) || defined(USE_MODMINER)
+#if defined(USE_BITFORCE) || defined(USE_ICARUS) || defined(USE_AVALON) || defined(USE_BITMAIN) || defined(USE_MODMINER)
 #	define USE_FPGA
 #elif defined(USE_ZTEX)
 #	define USE_FPGA
@@ -159,6 +163,9 @@ char *opt_icarus_timing = NULL;
 bool opt_worktime;
 #ifdef USE_AVALON
 char *opt_avalon_options = NULL;
+#endif
+#ifdef USE_BITMAIN
+char *opt_bitmain_options = NULL;
 #endif
 #ifdef USE_USBUTILS
 char *opt_usb_select = NULL;
@@ -311,7 +318,7 @@ struct sigaction termhandler, inthandler;
 
 struct thread_q *getq;
 
-static int total_work;
+static int total_work = 0;
 struct work *staged_work = NULL;
 
 struct schedtime {
@@ -581,6 +588,13 @@ static char *set_int_0_to_10(const char *arg, int *i)
 }
 
 #ifdef USE_AVALON
+static char *set_int_0_to_100(const char *arg, int *i)
+{
+	return set_int_range(arg, i, 0, 100);
+}
+#endif
+
+#ifdef USE_BITMAIN
 static char *set_int_0_to_100(const char *arg, int *i)
 {
 	return set_int_range(arg, i, 0, 100);
@@ -941,6 +955,15 @@ static char *set_avalon_options(const char *arg)
 }
 #endif
 
+#ifdef USE_BITMAIN
+static char *set_bitmain_options(const char *arg)
+{
+	opt_set_charp(arg, &opt_bitmain_options);
+
+	return NULL;
+}
+#endif
+
 #ifdef USE_USBUTILS
 static char *set_usb_select(const char *arg)
 {
@@ -1146,6 +1169,26 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_ARG("--bitburner-voltage",
 		     opt_set_intval, NULL, &opt_bitburner_core_voltage,
 		     "Set BitBurner core voltage, in millivolts"),
+#endif
+#ifdef USE_BITMAIN
+	OPT_WITHOUT_ARG("--bitmain-auto",
+			opt_set_bool, &opt_bitmain_auto,
+			"Adjust bitmain overclock frequency dynamically for best hashrate"),
+	OPT_WITH_ARG("--bitmain-cutoff",
+		     set_int_0_to_100, opt_show_intval, &opt_bitmain_overheat,
+		     "Set bitmain overheat cut off temperature"),
+	OPT_WITH_ARG("--bitmain-fan",
+		     set_bitmain_fan, NULL, NULL,
+		     "Set fanspeed percentage for bitmain, single value or range (default: 20-100)"),
+	OPT_WITH_ARG("--bitmain-freq",
+		     set_bitmain_freq, NULL, NULL,
+		     "Set frequency range for bitmain-auto, single value or range"),
+	OPT_WITH_ARG("--bitmain-options",
+		     set_bitmain_options, NULL, NULL,
+		     "Set bitmain options baud:miners:asic:timeout:freq"),
+	OPT_WITH_ARG("--bitmain-temp",
+		     set_int_0_to_100, opt_show_intval, &opt_bitmain_temp,
+		     "Set bitmain target temperature"),
 #endif
 	OPT_WITHOUT_ARG("--load-balance",
 		     set_loadbalance, &pool_strategy,
@@ -1468,6 +1511,9 @@ static char *opt_verusage_and_exit(const char *extra)
 	printf("%s\nBuilt with "
 #ifdef USE_AVALON
 		"avalon "
+#endif
+#ifdef USE_BITMAIN
+		"bitmain "
 #endif
 #ifdef USE_BFLSC
 		"bflsc "
@@ -6155,6 +6201,34 @@ struct work *clone_queued_work_bymidstate(struct cgpu_info *cgpu, char *midstate
 	return ret;
 }
 
+struct work *__find_work_byid(struct work *que, uint32_t id)
+{
+	struct work *work, *tmp, *ret = NULL;
+	//uint32_t workid = 0;
+
+	HASH_ITER(hh, que, work, tmp) {
+		//hex2bin((uint8_t*)(&worknonce2), work->nonce2, 4);
+		if (work->queued && work->id == id) {
+			ret = work;
+			break;
+		}
+	}
+
+	return ret;
+}
+
+struct work *find_queued_work_byid(struct cgpu_info *cgpu, uint32_t id)
+{
+	struct work *ret;
+
+	rd_lock(&cgpu->qlock);
+	ret = __find_work_byid(cgpu->queued_work, id);
+	rd_unlock(&cgpu->qlock);
+
+	return ret;
+}
+
+
 static void __work_completed(struct cgpu_info *cgpu, struct work *work)
 {
 	if (work->queued)
@@ -7158,6 +7232,10 @@ extern struct device_drv icarus_drv;
 extern struct device_drv avalon_drv;
 #endif
 
+#ifdef USE_BITMAIN
+extern struct device_drv bitmain_drv;
+#endif
+
 #ifdef USE_MODMINER
 extern struct device_drv modminer_drv;
 #endif
@@ -7456,6 +7534,10 @@ static void *hotplug_thread(void __maybe_unused *userdata)
 			avalon_drv.drv_detect();
 #endif
 
+#ifdef USE_BITMAIN
+			bitmain_drv.drv_detect();
+#endif
+
 			if (new_devices)
 				hotplug_process();
 
@@ -7696,6 +7778,13 @@ int main(int argc, char *argv[])
 #ifdef USE_AVALON
 	if (!opt_scrypt)
 		avalon_drv.drv_detect();
+#endif
+
+	/* Detect bitmain last since it will try to claim the device regardless
+	 * as detection is unreliable. */
+#ifdef USE_BITMAIN
+	if (!opt_scrypt)
+		bitmain_drv.drv_detect();
 #endif
 
 	if (opt_display_devs) {
