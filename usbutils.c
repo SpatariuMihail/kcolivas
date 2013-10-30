@@ -2272,6 +2272,7 @@ static void init_usb_transfer(struct usb_transfer *ut)
 	if (unlikely(!ut->transfer))
 		quit(1, "Failed to libusb_alloc_transfer");
 	ut->transfer->user_data = ut;
+	ut->transfer->flags |= LIBUSB_TRANSFER_ADD_ZERO_PACKET;
 	ut->cancellable = false;
 }
 
