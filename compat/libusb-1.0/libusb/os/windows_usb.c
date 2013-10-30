@@ -1816,6 +1816,7 @@ static int submit_control_transfer(struct usbi_transfer *itransfer)
 static int windows_submit_transfer(struct usbi_transfer *itransfer)
 {
 	struct libusb_transfer *transfer = USBI_TRANSFER_TO_LIBUSB_TRANSFER(itransfer);
+	uint16_t maxPacketSize = transfer->endpoint->wMaxPacketSize;
 
 	switch (transfer->type) {
 	case LIBUSB_TRANSFER_TYPE_CONTROL:
@@ -1823,8 +1824,11 @@ static int windows_submit_transfer(struct usbi_transfer *itransfer)
 	case LIBUSB_TRANSFER_TYPE_BULK:
 	case LIBUSB_TRANSFER_TYPE_INTERRUPT:
 		if (IS_XFEROUT(transfer) &&
-		    transfer->flags & LIBUSB_TRANSFER_ADD_ZERO_PACKET)
-			return LIBUSB_ERROR_NOT_SUPPORTED;
+		    transfer->flags & LIBUSB_TRANSFER_ADD_ZERO_PACKET) {
+			if (transfer->length % maxPacketSize)
+				/* do not need a zero packet */
+				transfer->flags &= ~LIBUSB_TRANSFER_ADD_ZERO_PACKET;
+		}
 		return submit_bulk_transfer(itransfer);
 	case LIBUSB_TRANSFER_TYPE_ISOCHRONOUS:
 		return submit_iso_transfer(itransfer);
@@ -2676,6 +2680,11 @@ static int winusb_submit_bulk_transfer(struct usbi_transfer *itransfer)
 	} else {
 		usbi_dbg("writing %d bytes", transfer->length);
 		ret = WinUsb_WritePipe(wfd.handle, transfer->endpoint, transfer->buffer, transfer->length, NULL, wfd.overlapped);
+		if (transfer->flags & LIBUSB_TRANSFER_ADD_ZERO_PACKET && ret) {
+			/* Write zero length packet if requested on completion */
+			WinUsb_WritePipe(wfd.handle, transfer->endpoint, NULL, 0,
+					 NULL, wfd.overlapped);
+		}
 	}
 	if (!ret) {
 		if(GetLastError() != ERROR_IO_PENDING) {
