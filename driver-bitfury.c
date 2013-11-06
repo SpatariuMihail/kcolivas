@@ -259,7 +259,7 @@ static int64_t bitfury_scanwork(struct thr_info *thr)
 	ms_diff = BF1WAIT - ms_tdiff(&tv_now, &info->tv_start);
 	if (unlikely(ms_diff < 10))
 		ms_diff = 10;
-	usb_read_once_timeout_cancellable(bitfury, info->buf + info->tot, BF1MSGSIZE,
+	usb_read_timeout_cancellable(bitfury, info->buf + info->tot, BF1MSGSIZE,
 					  &amount, ms_diff, C_BF1_GETRES);
 	info->tot += amount;
 	while (amount) {

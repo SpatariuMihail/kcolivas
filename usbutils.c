@@ -2467,6 +2467,7 @@ int _usb_read(struct cgpu_info *cgpu, int intinfo, int epinfo, char *buf, size_t
 
 			tot += got;
 
+			/* Cannot do both readonce and cancellable! */
 			if (err || readonce)
 				break;
 
