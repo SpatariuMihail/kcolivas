@@ -6556,6 +6556,19 @@ struct work *get_queued(struct cgpu_info *cgpu)
 	return work;
 }
 
+/* Add a work item to a cgpu's queued hashlist */
+void __add_queued(struct cgpu_info *cgpu, struct work *work)
+{
+	HASH_ADD_INT(cgpu->queued_work, id, work);
+}
+
+void add_queued(struct cgpu_info *cgpu, struct work *work)
+{
+	wr_lock(&cgpu->qlock);
+	__add_queued(cgpu, work);
+	wr_unlock(&cgpu->qlock);
+}
+
 /* This function is for finding an already queued work item in the
  * given que hashtable. Code using this function must be able
  * to handle NULL as a return which implies there is no matching work.
