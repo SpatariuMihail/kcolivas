@@ -134,6 +134,11 @@ struct avalon_info {
 
 	int core_voltage;
 
+	struct work **works;
+	int work_array;
+	int queued;
+	int results;
+
 	int no_matching_work;
 	int matching_work[AVALON_MAX_MINER_NUM];
 

@@ -960,7 +960,7 @@ static void avalon_running_reset(struct cgpu_info *avalon,
 {
 	avalon_reset(avalon, false);
 	avalon_idle(avalon, info);
-	avalon->results = 0;
+	info->results = 0;
 	info->reset = false;
 }
 
@@ -1022,18 +1022,18 @@ static void *avalon_get_results(void *userdata)
 	return NULL;
 }
 
-static void avalon_rotate_array(struct cgpu_info *avalon)
+static void avalon_rotate_array(struct avalon_info *info)
 {
-	avalon->queued = 0;
-	if (++avalon->work_array >= AVALON_ARRAY_SIZE)
-		avalon->work_array = 0;
+	info->queued = 0;
+	if (++info->work_array >= AVALON_ARRAY_SIZE)
+		info->work_array = 0;
 }
 
-static void bitburner_rotate_array(struct cgpu_info *avalon)
+static void bitburner_rotate_array(struct avalon_info *info)
 {
-	avalon->queued = 0;
-	if (++avalon->work_array >= BITBURNER_ARRAY_SIZE)
-		avalon->work_array = 0;
+	info->queued = 0;
+	if (++info->work_array >= BITBURNER_ARRAY_SIZE)
+		info->work_array = 0;
 }
 
 static void avalon_set_timeout(struct avalon_info *info)
@@ -1136,7 +1136,7 @@ static void *avalon_send_tasks(void *userdata)
 		cgsleep_prepare_r(&ts_start);
 
 		mutex_lock(&info->qlock);
-		start_count = avalon->work_array * avalon_get_work_count;
+		start_count = info->work_array * avalon_get_work_count;
 		end_count = start_count + avalon_get_work_count;
 		for (i = start_count, j = 0; i < end_count; i++, j++) {
 			if (avalon_buffer_full(avalon)) {
@@ -1146,11 +1146,11 @@ static void *avalon_send_tasks(void *userdata)
 				break;
 			}
 
-			if (likely(j < avalon->queued && !info->overheat && avalon->works[i])) {
+			if (likely(j < info->queued && !info->overheat && info->works[i])) {
 				avalon_init_task(&at, 0, 0, info->fan_pwm,
 						info->timeout, info->asic_count,
 						info->miner_count, 1, 0, info->frequency);
-				avalon_create_task(&at, avalon->works[i]);
+				avalon_create_task(&at, info->works[i]);
 				info->auto_queued++;
 			} else {
 				int idle_freq = info->frequency;
@@ -1178,7 +1178,7 @@ static void *avalon_send_tasks(void *userdata)
 			}
 		}
 
-		avalon_rotate_array(avalon);
+		avalon_rotate_array(info);
 		mutex_unlock(&info->qlock);
 
 		cgsem_post(&info->qsem);
@@ -1222,20 +1222,20 @@ static void *bitburner_send_tasks(void *userdata)
 		do {
 			cgsleep_ms(40);
 		} while (!avalon->shutdown && i++ < 15
-			&& avalon->queued < avalon_get_work_count);
+			&& info->queued < avalon_get_work_count);
 
 		mutex_lock(&info->qlock);
-		start_count = avalon->work_array * avalon_get_work_count;
+		start_count = info->work_array * avalon_get_work_count;
 		end_count = start_count + avalon_get_work_count;
 		for (i = start_count, j = 0; i < end_count; i++, j++) {
 			while (avalon_buffer_full(avalon))
 				cgsleep_ms(40);
 
-			if (likely(j < avalon->queued && !info->overheat && avalon->works[i])) {
+			if (likely(j < info->queued && !info->overheat && info->works[i])) {
 				avalon_init_task(&at, 0, 0, info->fan_pwm,
 						info->timeout, info->asic_count,
 						info->miner_count, 1, 0, info->frequency);
-				avalon_create_task(&at, avalon->works[i]);
+				avalon_create_task(&at, info->works[i]);
 				info->auto_queued++;
 			} else {
 				int idle_freq = info->frequency;
@@ -1263,7 +1263,7 @@ static void *bitburner_send_tasks(void *userdata)
 			}
 		}
 
-		bitburner_rotate_array(avalon);
+		bitburner_rotate_array(info);
 		mutex_unlock(&info->qlock);
 
 		cgsem_post(&info->qsem);
@@ -1288,10 +1288,9 @@ static bool avalon_prepare(struct thr_info *thr)
 		write_thread_fn = bitburner_send_tasks;
 	}
 
-	free(avalon->works);
-	avalon->works = calloc(info->miner_count * sizeof(struct work *),
+	info->works = calloc(info->miner_count * sizeof(struct work *),
 			       array_size);
-	if (!avalon->works)
+	if (!info->works)
 		quit(1, "Failed to calloc avalon works in avalon_prepare");
 
 	info->thr = thr;
@@ -1468,20 +1467,20 @@ static bool avalon_fill(struct cgpu_info *avalon)
 
 	mc = info->miner_count;
 	mutex_lock(&info->qlock);
-	if (avalon->queued >= mc)
+	if (info->queued >= mc)
 		goto out_unlock;
 	work = get_queued(avalon);
 	if (unlikely(!work)) {
 		ret = false;
 		goto out_unlock;
 	}
-	subid = avalon->queued++;
+	subid = info->queued++;
 	work->subid = subid;
-	slot = avalon->work_array * mc + subid;
-	if (likely(avalon->works[slot]))
-		work_completed(avalon, avalon->works[slot]);
-	avalon->works[slot] = work;
-	if (avalon->queued < mc)
+	slot = info->work_array * mc + subid;
+	if (likely(info->works[slot]))
+		work_completed(avalon, info->works[slot]);
+	info->works[slot] = work;
+	if (info->queued < mc)
 		ret = false;
 out_unlock:
 	mutex_unlock(&info->qlock);
@@ -1506,18 +1505,18 @@ static int64_t avalon_scanhash(struct thr_info *thr)
 
 	mutex_lock(&info->lock);
 	hash_count = 0xffffffffull * (uint64_t)info->nonces;
-	avalon->results += info->nonces + info->idle;
-	if (avalon->results > miner_count)
-		avalon->results = miner_count;
+	info->results += info->nonces + info->idle;
+	if (info->results > miner_count)
+		info->results = miner_count;
 	if (!info->reset)
-		avalon->results--;
+		info->results--;
 	info->nonces = info->idle = 0;
 	mutex_unlock(&info->lock);
 
 	/* Check for nothing but consecutive bad results or consistently less
 	 * results than we should be getting and reset the FPGA if necessary */
 	if (!is_bitburner(avalon)) {
-		if (avalon->results < -miner_count && !info->reset) {
+		if (info->results < -miner_count && !info->reset) {
 			applog(LOG_ERR, "%s%d: Result return rate low, resetting!",
 				avalon->drv->name, avalon->device_id);
 			info->reset = true;
@@ -1540,7 +1539,7 @@ static void avalon_flush_work(struct cgpu_info *avalon)
 
 	mutex_lock(&info->qlock);
 	/* Will overwrite any work queued */
-	avalon->queued = 0;
+	info->queued = 0;
 	mutex_unlock(&info->qlock);
 
 	/* Signal main loop we need more work */
@@ -1601,8 +1600,8 @@ static void avalon_shutdown(struct thr_info *thr)
 	cgsem_destroy(&info->qsem);
 	mutex_destroy(&info->qlock);
 	mutex_destroy(&info->lock);
-	free(avalon->works);
-	avalon->works = NULL;
+	free(info->works);
+	info->works = NULL;
 }
 
 static char *avalon_set_device(struct cgpu_info *avalon, char *option, char *setting, char *replybuf)
