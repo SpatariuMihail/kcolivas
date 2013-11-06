@@ -181,8 +181,6 @@ char *opt_usb_select = NULL;
 int opt_usbdump = -1;
 bool opt_usb_list_all;
 cgsem_t usb_resource_sem;
-static pthread_t usb_poll_thread;
-static bool usb_polling;
 #endif
 
 char *opt_kernel_path;
@@ -7399,8 +7397,8 @@ static void clean_up(bool restarting)
 	clear_adl(nDevs);
 #endif
 #ifdef USE_USBUTILS
-	usb_polling = false;
-	pthread_join(usb_poll_thread, NULL);
+	while (usb_transfers())
+		cgsleep_ms(100);
         libusb_exit(NULL);
 #endif
 
@@ -7973,27 +7971,6 @@ static void probe_pools(void)
 #define DRIVER_DRV_DETECT_ALL(X) X##_drv.drv_detect(false);
 
 #ifdef USE_USBUTILS
-static void *libusb_poll_thread(void __maybe_unused *arg)
-{
-	struct timeval tv_end = {1, 0};
-
-	RenameThread("usbpoll");
-
-	while (usb_polling)
-		libusb_handle_events_timeout_completed(NULL, &tv_end, NULL);
-
-	/* Cancel any cancellable usb transfers */
-	cancel_usb_transfers();
-
-	/* Keep event handling going until there are no async transfers in
-	 * flight. */
-	do {
-		libusb_handle_events_timeout_completed(NULL, &tv_end, NULL);
-	} while (async_usb_transfers());
-
-	return NULL;
-}
-
 static void initialise_usb(void) {
 	int err = libusb_init(NULL);
 	if (err) {
@@ -8004,8 +7981,6 @@ static void initialise_usb(void) {
 	mutex_init(&cgusb_lock);
 	mutex_init(&cgusbres_lock);
 	cglock_init(&cgusb_fd_lock);
-	usb_polling = true;
-	pthread_create(&usb_poll_thread, NULL, libusb_poll_thread, NULL);
 }
 #else
 #define initialise_usb() {}

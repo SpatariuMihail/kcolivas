@@ -371,7 +371,7 @@ enum usb_cmds {
 struct device_drv;
 struct cgpu_info;
 
-bool async_usb_transfers(void);
+bool usb_transfers(void);
 void cancel_usb_transfers(void);
 void usb_all(int level);
 const char *usb_cmdname(enum usb_cmds cmd);

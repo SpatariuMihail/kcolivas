@@ -2268,13 +2268,11 @@ static char *find_end(unsigned char *buf, unsigned char *ptr, int ptrlen, int to
 #define USB_RETRY_MAX 5
 
 struct usb_transfer {
-	cgsem_t cgsem;
-	struct libusb_transfer *transfer;
 	bool cancellable;
 	struct list_head list;
 };
 
-bool async_usb_transfers(void)
+bool usb_transfers(void)
 {
 	bool ret;
 
@@ -2298,7 +2296,6 @@ void cancel_usb_transfers(void)
 	list_for_each_entry(ut, &ut_list, list) {
 		if (ut->cancellable) {
 			ut->cancellable = false;
-			libusb_cancel_transfer(ut->transfer);
 			cancellations++;
 		}
 	}
@@ -2308,105 +2305,6 @@ void cancel_usb_transfers(void)
 		applog(LOG_DEBUG, "Cancelled %d USB transfers", cancellations);
 }
 
-static void init_usb_transfer(struct usb_transfer *ut)
-{
-	cgsem_init(&ut->cgsem);
-	ut->transfer = libusb_alloc_transfer(0);
-	if (unlikely(!ut->transfer))
-		quit(1, "Failed to libusb_alloc_transfer");
-	ut->transfer->user_data = ut;
-	ut->cancellable = false;
-}
-
-static void complete_usb_transfer(struct usb_transfer *ut)
-{
-	cg_wlock(&cgusb_fd_lock);
-	list_del(&ut->list);
-	cg_wunlock(&cgusb_fd_lock);
-
-	cgsem_destroy(&ut->cgsem);
-	libusb_free_transfer(ut->transfer);
-}
-
-static void LIBUSB_CALL transfer_callback(struct libusb_transfer *transfer)
-{
-	struct usb_transfer *ut = transfer->user_data;
-
-	ut->cancellable = false;
-	cgsem_post(&ut->cgsem);
-}
-
-static int usb_transfer_toerr(int ret)
-{
-	if (ret <= 0)
-		return ret;
-
-	switch (ret) {
-		default:
-		case LIBUSB_TRANSFER_COMPLETED:
-			ret = LIBUSB_SUCCESS;
-			break;
-		case LIBUSB_TRANSFER_ERROR:
-			ret = LIBUSB_ERROR_IO;
-			break;
-		case LIBUSB_TRANSFER_TIMED_OUT:
-		case LIBUSB_TRANSFER_CANCELLED:
-			ret = LIBUSB_ERROR_TIMEOUT;
-			break;
-		case LIBUSB_TRANSFER_STALL:
-			ret = LIBUSB_ERROR_PIPE;
-			break;
-		case LIBUSB_TRANSFER_NO_DEVICE:
-			ret = LIBUSB_ERROR_NO_DEVICE;
-			break;
-		case LIBUSB_TRANSFER_OVERFLOW:
-			ret = LIBUSB_ERROR_OVERFLOW;
-			break;
-	}
-	return ret;
-}
-
-/* Wait for callback function to tell us it has finished the USB transfer, but
- * use our own timer to cancel the request if we go beyond the timeout. */
-static int callback_wait(struct usb_transfer *ut, int *transferred, unsigned int timeout)
-{
-	struct libusb_transfer *transfer= ut->transfer;
-	int ret;
-
-	ret = cgsem_mswait(&ut->cgsem, timeout);
-	if (ret == ETIMEDOUT) {
-		/* We are emulating a timeout ourself here */
-		libusb_cancel_transfer(transfer);
-
-		/* Now wait for the callback function to be invoked. */
-		cgsem_wait(&ut->cgsem);
-	}
-	ret = transfer->status;
-	ret = usb_transfer_toerr(ret);
-
-	/* No need to sort out mutexes here since they won't be reused */
-	*transferred = transfer->actual_length;
-
-	return ret;
-}
-
-static int usb_submit_transfer(struct usb_transfer *ut, struct libusb_transfer *transfer,
-			       bool cancellable)
-{
-	int err;
-
-	INIT_LIST_HEAD(&ut->list);
-
-	cg_wlock(&cgusb_fd_lock);
-	err = libusb_submit_transfer(transfer);
-	if (likely(!err))
-		ut->cancellable = cancellable;
-	list_add(&ut->list, &ut_list);
-	cg_wunlock(&cgusb_fd_lock);
-
-	return err;
-}
-
 static int
 usb_bulk_transfer(struct libusb_device_handle *dev_handle, int intinfo,
 		  int epinfo, unsigned char *data, int length,
@@ -2414,7 +2312,6 @@ usb_bulk_transfer(struct libusb_device_handle *dev_handle, int intinfo,
 		  struct cgpu_info *cgpu, __maybe_unused int mode,
 		  enum usb_cmds cmd, __maybe_unused int seq, bool cancellable)
 {
-	int bulk_timeout, callback_timeout = timeout;
 	struct usb_epinfo *usb_epinfo;
 	struct usb_transfer ut;
 	unsigned char endpoint;
@@ -2423,43 +2320,41 @@ usb_bulk_transfer(struct libusb_device_handle *dev_handle, int intinfo,
 	struct timeval tv_start, tv_finish;
 #endif
 	unsigned char buf[512];
-#ifdef WIN32
-	/* On windows the callback_timeout is a safety mechanism only. */
-	bulk_timeout = timeout;
-	callback_timeout += WIN_CALLBACK_EXTRA;
-#else
-	/* We give the transfer no timeout since we manage timeouts ourself on
-	 * non windows. */
-	bulk_timeout = 0;
-#endif
 
 	usb_epinfo = &(cgpu->usbdev->found->intinfos[intinfo].epinfos[epinfo]);
 	endpoint = usb_epinfo->ep;
 
-	if (length > usb_epinfo->wMaxPacketSize)
-		length = usb_epinfo->wMaxPacketSize;
+	if ((endpoint & LIBUSB_ENDPOINT_DIR_MASK) == LIBUSB_ENDPOINT_OUT) {
+		if (length > usb_epinfo->wMaxPacketSize)
+			length = usb_epinfo->wMaxPacketSize;
+		memcpy(buf, data, length);
+	}
 
 	/* Avoid any async transfers during shutdown to allow the polling
 	 * thread to be shut down after all existing transfers are complete */
 	if (unlikely(cgpu->shutdown))
 		return libusb_bulk_transfer(dev_handle, endpoint, data, length, transferred, timeout);
 
-	if ((endpoint & LIBUSB_ENDPOINT_DIR_MASK) == LIBUSB_ENDPOINT_OUT)
-		memcpy(buf, data, length);
 
 	USBDEBUG("USB debug: @usb_bulk_transfer(%s (nodev=%s),intinfo=%d,epinfo=%d,data=%p,length=%d,timeout=%u,mode=%d,cmd=%s,seq=%d) endpoint=%d", cgpu->drv->name, bool_str(cgpu->usbinfo.nodev), intinfo, epinfo, data, length, timeout, mode, usb_cmdname(cmd), seq, (int)endpoint);
 
-	init_usb_transfer(&ut);
-	libusb_fill_bulk_transfer(ut.transfer, dev_handle, endpoint, buf, length,
-				  transfer_callback, &ut, bulk_timeout);
+	INIT_LIST_HEAD(&ut.list);
+	ut.cancellable = cancellable;
+	/* Emulate longer timeouts by repeatedly doing shorter timeouts */
+	if (cancellable && timeout > 100)
+		timeout = 100;
+
+	cg_wlock(&cgusb_fd_lock);
+	list_add(&ut.list, &ut_list);
+	cg_wunlock(&cgusb_fd_lock);
+
 	STATS_TIMEVAL(&tv_start);
-	err = usb_submit_transfer(&ut, ut.transfer, cancellable);
+	err = libusb_bulk_transfer(dev_handle, endpoint, data, length, transferred, timeout);
 	errn = errno;
-	if (!err)
-		err = callback_wait(&ut, transferred, callback_timeout);
-	else
-		err = usb_transfer_toerr(err);
-	complete_usb_transfer(&ut);
+
+	cg_wlock(&cgusb_fd_lock);
+	list_del(&ut.list);
+	cg_wunlock(&cgusb_fd_lock);
 
 	STATS_TIMEVAL(&tv_finish);
 	USB_STATS(cgpu, &tv_start, &tv_finish, err, mode, cmd, seq, timeout);
@@ -2468,6 +2363,9 @@ usb_bulk_transfer(struct libusb_device_handle *dev_handle, int intinfo,
 		applog(LOG_DEBUG, "%s%i: %s (amt=%d err=%d ern=%d)",
 				cgpu->drv->name, cgpu->device_id,
 				usb_cmdname(cmd), *transferred, err, errn);
+		/* Cancellability may be changed while running */
+		if (ut.cancellable && err == LIBUSB_ERROR_TIMEOUT)
+			err = LIBUSB_SUCCESS;
 	}
 
 	if (err == LIBUSB_ERROR_PIPE) {
