@@ -2324,10 +2324,11 @@ usb_bulk_transfer(struct libusb_device_handle *dev_handle, int intinfo,
 	usb_epinfo = &(cgpu->usbdev->found->intinfos[intinfo].epinfos[epinfo]);
 	endpoint = usb_epinfo->ep;
 
-	if (length > usb_epinfo->wMaxPacketSize)
-		length = usb_epinfo->wMaxPacketSize;
-	if ((endpoint & LIBUSB_ENDPOINT_DIR_MASK) == LIBUSB_ENDPOINT_OUT)
+	if ((endpoint & LIBUSB_ENDPOINT_DIR_MASK) == LIBUSB_ENDPOINT_OUT) {
+		if (length > usb_epinfo->wMaxPacketSize)
+			length = usb_epinfo->wMaxPacketSize;
 		memcpy(buf, data, length);
+	}
 
 	/* Avoid any async transfers during shutdown to allow the polling
 	 * thread to be shut down after all existing transfers are complete */
