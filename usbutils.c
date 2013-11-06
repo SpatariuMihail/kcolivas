@@ -2339,17 +2339,19 @@ usb_bulk_transfer(struct libusb_device_handle *dev_handle, int intinfo,
 	USBDEBUG("USB debug: @usb_bulk_transfer(%s (nodev=%s),intinfo=%d,epinfo=%d,data=%p,length=%d,timeout=%u,mode=%d,cmd=%s,seq=%d) endpoint=%d", cgpu->drv->name, bool_str(cgpu->usbinfo.nodev), intinfo, epinfo, data, length, timeout, mode, usb_cmdname(cmd), seq, (int)endpoint);
 
 	INIT_LIST_HEAD(&ut.list);
-	ut.cancellable = cancellable;
 	/* Emulate longer timeouts by repeatedly doing shorter timeouts */
 	if (cancellable && timeout > 100)
 		timeout = 100;
+	else
+		cancellable = false;
+	ut.cancellable = cancellable;
 
 	cg_wlock(&cgusb_fd_lock);
 	list_add(&ut.list, &ut_list);
 	cg_wunlock(&cgusb_fd_lock);
 
 	STATS_TIMEVAL(&tv_start);
-	err = libusb_bulk_transfer(dev_handle, endpoint, data, length, transferred, timeout);
+	err = libusb_bulk_transfer(dev_handle, endpoint, buf, length, transferred, timeout);
 	errn = errno;
 
 	cg_wlock(&cgusb_fd_lock);
