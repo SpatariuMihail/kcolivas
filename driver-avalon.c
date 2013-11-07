@@ -288,32 +288,14 @@ static inline bool avalon_cts(char c)
 	return (c & AVALON_CTS);
 }
 
-static int avalon_read(struct cgpu_info *avalon, unsigned char *buf,
-		       size_t bufsize, int timeout, int ep)
+static int avalon_read(struct cgpu_info *avalon, char *buf, size_t bufsize, int ep)
 {
-	size_t total = 0, readsize = bufsize + 2;
-	char readbuf[AVALON_READBUF_SIZE];
-	int err, amount, ofs = 2, cp;
+	int err, amount;
 
-	err = usb_read_once_timeout(avalon, readbuf, readsize, &amount, timeout, ep);
+	err = usb_read_once(avalon, buf, bufsize, &amount, ep);
 	applog(LOG_DEBUG, "%s%i: Get avalon read got err %d",
 	       avalon->drv->name, avalon->device_id, err);
-
-	if (amount < 2)
-		goto out;
-
-	/* The first 2 of every 64 bytes are status on FTDIRL */
-	while (amount > 2) {
-		cp = amount - 2;
-		if (cp > 62)
-			cp = 62;
-		memcpy(&buf[total], &readbuf[ofs], cp);
-		total += cp;
-		amount -= cp + 2;
-		ofs += 64;
-	}
-out:
-	return total;
+	return amount;
 }
 
 static int avalon_reset(struct cgpu_info *avalon, bool initial)
@@ -344,8 +326,7 @@ static int avalon_reset(struct cgpu_info *avalon, bool initial)
 		return 0;
 	}
 
-	ret = avalon_read(avalon, (unsigned char *)&ar, AVALON_READ_SIZE,
-			  AVALON_RESET_TIMEOUT, C_GET_AVALON_RESET);
+	ret = avalon_read(avalon, (char *)&ar, AVALON_READ_SIZE, C_GET_AVALON_RESET);
 
 	/* What do these sleeps do?? */
 	p.tv_sec = 0;
@@ -777,9 +758,7 @@ static bool avalon_detect_one(libusb_device *dev, struct usb_find_devices *found
 				 &asic_count, &timeout, &frequency,
 				 (usb_ident(avalon) == IDENT_BBF && opt_bitburner_fury_options != NULL) ? opt_bitburner_fury_options : opt_avalon_options);
 
-	/* Even though this is an FTDI type chip, we want to do the parsing
-	 * all ourselves so set it to std usb type */
-	avalon->usbdev->usb_type = USB_TYPE_STD;
+	avalon->usbdev->usb_type = USB_TYPE_FTDI;
 
 	/* We have a real Avalon! */
 	avalon_initialise(avalon);
@@ -979,16 +958,14 @@ static void *avalon_get_results(void *userdata)
 	const int rsize = AVALON_FTDI_READSIZE;
 	char readbuf[AVALON_READBUF_SIZE];
 	struct thr_info *thr = info->thr;
-	cgtimer_t ts_start;
 	int offset = 0, ret = 0;
 	char threadname[24];
 
 	snprintf(threadname, 24, "ava_recv/%d", avalon->device_id);
 	RenameThread(threadname);
-	cgsleep_prepare_r(&ts_start);
 
 	while (likely(!avalon->shutdown)) {
-		unsigned char buf[rsize];
+		char buf[rsize];
 
 		if (offset >= (int)AVALON_READ_SIZE)
 			avalon_parse_results(avalon, info, thr, readbuf, &offset);
@@ -1005,16 +982,7 @@ static void *avalon_get_results(void *userdata)
 			offset = 0;
 		}
 
-		/* As the usb read returns after just 1ms, sleep long enough
-		 * to leave the interface idle for writes to occur, but do not
-		 * sleep if we have been receiving data, and we do not yet have
-		 * a full result as more may be coming. */
-		if (ret < 1 || offset == 0)
-			cgsleep_ms_r(&ts_start, AVALON_READ_TIMEOUT);
-
-		cgsleep_prepare_r(&ts_start);
-		ret = avalon_read(avalon, buf, rsize, AVALON_READ_TIMEOUT,
-				  C_AVALON_READ);
+		ret = avalon_read(avalon, buf, rsize, C_AVALON_READ);
 
 		if (ret < 1)
 			continue;
@@ -1178,11 +1146,11 @@ static void *avalon_send_tasks(void *userdata)
 			ret = avalon_send_task(&at, avalon);
 
 			if (unlikely(ret == AVA_SEND_ERROR)) {
+				/* Send errors are fatal */
 				applog(LOG_ERR, "%s%i: Comms error(buffer)",
 				       avalon->drv->name, avalon->device_id);
 				dev_error(avalon, REASON_DEV_COMMS_ERROR);
-				info->reset = true;
-				break;
+				goto out;
 			}
 		}
 
@@ -1202,6 +1170,7 @@ static void *avalon_send_tasks(void *userdata)
 		 * fall short of the full duration. */
 		cgsleep_us_r(&ts_start, us_timeout);
 	}
+out:
 	return NULL;
 }
 
@@ -1535,7 +1504,7 @@ static int64_t avalon_scanhash(struct thr_info *thr)
 	if (unlikely(avalon->usbinfo.nodev)) {
 		applog(LOG_ERR, "%s%d: Device disappeared, shutting down thread",
 		       avalon->drv->name, avalon->device_id);
-		avalon->shutdown = true;
+		hash_count = -1;
 	}
 
 	/* This hashmeter is just a utility counter based on returned shares */
