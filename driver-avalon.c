@@ -1112,6 +1112,7 @@ static void *avalon_send_tasks(void *userdata)
 		struct timeval now;
 		cgtimer_t ts_start;
 		int64_t us_timeout;
+		bool ret;
 
 		while (avalon_buffer_full(avalon))
 			cgsleep_ms(40);
@@ -1125,18 +1126,29 @@ static void *avalon_send_tasks(void *userdata)
 		queued = 0;
 		mutex_lock(&info->qlock);
 		while (42) {
-			if (queued == avalon_get_work_count) {
-				applog(LOG_DEBUG, "%s%i: Buffer full with %d work queued",
-					avalon->drv->name, avalon->device_id, queued);
-				break;
-			}
 			if (avalon_buffer_full(avalon)) {
-				/* More verbose output if queued count doesn't match. */
-				applog(LOG_INFO, "%s%i: Buffer full with %d of %d work queued",
-				       avalon->drv->name, avalon->device_id, queued, avalon_get_work_count);
+				if (queued != avalon_get_work_count) {
+					/* More verbose output if queued count doesn't match. */
+					applog(LOG_INFO, "%s%i: Buffer full with %d of %d work queued",
+					       avalon->drv->name, avalon->device_id, queued, avalon_get_work_count);
+				} else {
+					applog(LOG_DEBUG, "%s%i: Buffer full with %d work queued",
+					       avalon->drv->name, avalon->device_id, queued);
+				}
 				break;
 			}
-			if (unlikely(info->overheat)) {
+
+			if (likely(!info->overheat)) {
+				/* Actually queue real work here. */
+				work = get_queue_work(info->thr, avalon, info->thr->id);
+				cgtime(&work->tv_work_start);
+				work->subid = queued++;
+				avalon_init_task(&at, 0, 0, info->fan_pwm, info->timeout,
+						info->asic_count, info->miner_count, 1, 0,
+						info->frequency);
+				avalon_create_task(&at, work);
+				info->auto_queued++;
+			} else {
 				int idle_freq;
 
 				idled++;
@@ -1151,17 +1163,16 @@ static void *avalon_send_tasks(void *userdata)
 				 * idling any miners. */
 				avalon_reset_auto(info);
 				queued++;
-				continue;
 			}
-			/* Actually queue real work here. */
-			work = get_queue_work(info->thr, avalon, info->thr->id);
-			cgtime(&work->tv_work_start);
-			work->subid = queued++;
-			avalon_init_task(&at, 0, 0, info->fan_pwm, info->timeout,
-					 info->asic_count, info->miner_count, 1, 0,
-					 info->frequency);
-			avalon_create_task(&at, work);
-			info->auto_queued++;
+			ret = avalon_send_task(&at, avalon);
+
+			if (unlikely(ret == AVA_SEND_ERROR)) {
+				applog(LOG_ERR, "%s%i: Comms error(buffer)",
+				       avalon->drv->name, avalon->device_id);
+				dev_error(avalon, REASON_DEV_COMMS_ERROR);
+				info->reset = true;
+				break;
+			}
 		}
 		mutex_unlock(&info->qlock);
 
