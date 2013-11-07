@@ -6569,6 +6569,15 @@ void add_queued(struct cgpu_info *cgpu, struct work *work)
 	wr_unlock(&cgpu->qlock);
 }
 
+/* Get fresh work and add it to cgpu's queued hashlist */
+struct work *get_queue_work(struct thr_info *thr, struct cgpu_info *cgpu, int thr_id)
+{
+	struct work *work = get_work(thr, thr_id);
+
+	add_queued(cgpu, work);
+	return work;
+}
+
 /* This function is for finding an already queued work item in the
  * given que hashtable. Code using this function must be able
  * to handle NULL as a return which implies there is no matching work.
