@@ -1022,20 +1022,6 @@ static void *avalon_get_results(void *userdata)
 	return NULL;
 }
 
-static void avalon_rotate_array(struct avalon_info *info)
-{
-	info->queued = 0;
-	if (++info->work_array >= AVALON_ARRAY_SIZE)
-		info->work_array = 0;
-}
-
-static void bitburner_rotate_array(struct avalon_info *info)
-{
-	info->queued = 0;
-	if (++info->work_array >= BITBURNER_ARRAY_SIZE)
-		info->work_array = 0;
-}
-
 static void avalon_set_timeout(struct avalon_info *info)
 {
 	info->timeout = avalon_calc_timeout(info->frequency);
@@ -1120,10 +1106,11 @@ static void *avalon_send_tasks(void *userdata)
 	RenameThread(threadname);
 
 	while (likely(!avalon->shutdown)) {
-		int start_count, end_count, i, j, ret;
-		cgtimer_t ts_start;
+		int queued, ret, idled = 0;
+		struct work *work, *tmp;
 		struct avalon_task at;
-		bool idled = false;
+		struct timeval now;
+		cgtimer_t ts_start;
 		int64_t us_timeout;
 
 		while (avalon_buffer_full(avalon))
@@ -1135,50 +1122,46 @@ static void *avalon_send_tasks(void *userdata)
 		us_timeout = 0x100000000ll / info->asic_count / info->frequency;
 		cgsleep_prepare_r(&ts_start);
 
+		queued = 0;
 		mutex_lock(&info->qlock);
-		start_count = info->work_array * avalon_get_work_count;
-		end_count = start_count + avalon_get_work_count;
-		for (i = start_count, j = 0; i < end_count; i++, j++) {
+		while (42) {
 			if (avalon_buffer_full(avalon)) {
-				applog(LOG_INFO,
-				       "%s%i: Buffer full after only %d of %d work queued",
-					avalon->drv->name, avalon->device_id, j, avalon_get_work_count);
+				/* More verbose output if queued count doesn't match. */
+				if (queued != avalon_get_work_count) {
+					applog(LOG_INFO, "%s%i: Buffer full after with %d of %d work queued",
+					       avalon->drv->name, avalon->device_id, queued, avalon_get_work_count);
+				} else {
+					applog(LOG_DEBUG, "%s%i: Buffer full with %d work queued",
+					       avalon->drv->name, avalon->device_id, queued);
+				}
 				break;
 			}
+			if (unlikely(info->overheat)) {
+				int idle_freq;
 
-			if (likely(j < info->queued && !info->overheat && info->works[i])) {
-				avalon_init_task(&at, 0, 0, info->fan_pwm,
-						info->timeout, info->asic_count,
-						info->miner_count, 1, 0, info->frequency);
-				avalon_create_task(&at, info->works[i]);
-				info->auto_queued++;
-			} else {
-				int idle_freq = info->frequency;
-
-				if (!info->idle++)
-					idled = true;
-				if (unlikely(info->overheat && opt_avalon_auto))
+				idled++;
+				if (opt_avalon_auto)
 					idle_freq = AVALON_MIN_FREQUENCY;
+				else
+					idle_freq = info->frequency;
 				avalon_init_task(&at, 0, 0, info->fan_pwm,
 						info->timeout, info->asic_count,
 						info->miner_count, 1, 1, idle_freq);
 				/* Reset the auto_queued count if we end up
 				 * idling any miners. */
 				avalon_reset_auto(info);
+				continue;
 			}
-
-			ret = avalon_send_task(&at, avalon);
-
-			if (unlikely(ret == AVA_SEND_ERROR)) {
-				applog(LOG_ERR, "%s%i: Comms error(buffer)",
-				       avalon->drv->name, avalon->device_id);
-				dev_error(avalon, REASON_DEV_COMMS_ERROR);
-				info->reset = true;
-				break;
-			}
+			/* Actually queue real work here. */
+			work = get_queue_work(info->thr, avalon, info->thr->id);
+			cgtime(&work->tv_work_start);
+			work->subid = queued++;
+			avalon_init_task(&at, 0, 0, info->fan_pwm, info->timeout,
+					 info->asic_count, info->miner_count, 1, 0,
+					 info->frequency);
+			avalon_create_task(&at, work);
+			info->auto_queued++;
 		}
-
-		avalon_rotate_array(info);
 		mutex_unlock(&info->qlock);
 
 		cgsem_post(&info->qsem);
@@ -1187,6 +1170,17 @@ static void *avalon_send_tasks(void *userdata)
 			applog(LOG_WARNING, "%s%i: Idled %d miners",
 			       avalon->drv->name, avalon->device_id, idled);
 		}
+
+		/* Age work in the hash list here. Anything started over 10s
+		 * ago is discarded */
+		cgtime(&now);
+
+		wr_lock(&avalon->qlock);
+		HASH_ITER(hh, avalon->queued_work, work, tmp) {
+			if (tdiff(&now, &work->tv_work_start) > 10.0)
+				__work_completed(avalon, work);
+		}
+		wr_unlock(&avalon->qlock);
 
 		/* Sleep how long it would take to complete a full nonce range
 		 * at the current frequency using the clock_nanosleep function
@@ -1199,6 +1193,7 @@ static void *avalon_send_tasks(void *userdata)
 
 static void *bitburner_send_tasks(void *userdata)
 {
+#if 0
 	struct cgpu_info *avalon = (struct cgpu_info *)userdata;
 	struct avalon_info *info = avalon->device_data;
 	const int avalon_get_work_count = info->miner_count;
@@ -1274,24 +1269,18 @@ static void *bitburner_send_tasks(void *userdata)
 		}
 	}
 	return NULL;
+#endif
+	
 }
 
 static bool avalon_prepare(struct thr_info *thr)
 {
 	struct cgpu_info *avalon = thr->cgpu;
 	struct avalon_info *info = avalon->device_data;
-	int array_size = AVALON_ARRAY_SIZE;
 	void *(*write_thread_fn)(void *) = avalon_send_tasks;
 
-	if (is_bitburner(avalon)) {
-		array_size = BITBURNER_ARRAY_SIZE;
+	if (is_bitburner(avalon))
 		write_thread_fn = bitburner_send_tasks;
-	}
-
-	info->works = calloc(info->miner_count * sizeof(struct work *),
-			       array_size);
-	if (!info->works)
-		quit(1, "Failed to calloc avalon works in avalon_prepare");
 
 	info->thr = thr;
 	mutex_init(&info->lock);
@@ -1456,6 +1445,7 @@ static void get_avalon_statline_before(char *buf, size_t bufsiz, struct cgpu_inf
 	}
 }
 
+#if 0
 /* We use a replacement algorithm to only remove references to work done from
  * the buffer when we need the extra space for new work. */
 static bool avalon_fill(struct cgpu_info *avalon)
@@ -1487,6 +1477,7 @@ out_unlock:
 
 	return ret;
 }
+#endif
 
 static int64_t avalon_scanhash(struct thr_info *thr)
 {
@@ -1531,19 +1522,6 @@ static int64_t avalon_scanhash(struct thr_info *thr)
 
 	/* This hashmeter is just a utility counter based on returned shares */
 	return hash_count;
-}
-
-static void avalon_flush_work(struct cgpu_info *avalon)
-{
-	struct avalon_info *info = avalon->device_data;
-
-	mutex_lock(&info->qlock);
-	/* Will overwrite any work queued */
-	info->queued = 0;
-	mutex_unlock(&info->qlock);
-
-	/* Signal main loop we need more work */
-	cgsem_post(&info->qsem);
 }
 
 static struct api_data *avalon_api_stats(struct cgpu_info *cgpu)
@@ -1600,8 +1578,6 @@ static void avalon_shutdown(struct thr_info *thr)
 	cgsem_destroy(&info->qsem);
 	mutex_destroy(&info->qlock);
 	mutex_destroy(&info->lock);
-	free(info->works);
-	info->works = NULL;
 }
 
 static char *avalon_set_device(struct cgpu_info *avalon, char *option, char *setting, char *replybuf)
@@ -1668,10 +1644,8 @@ struct device_drv avalon_drv = {
 	.name = "AVA",
 	.drv_detect = avalon_detect,
 	.thread_prepare = avalon_prepare,
-	.hash_work = hash_queued_work,
-	.queue_full = avalon_fill,
+	.hash_work = hash_driver_work,
 	.scanwork = avalon_scanhash,
-	.flush_work = avalon_flush_work,
 	.get_api_stats = avalon_api_stats,
 	.get_statline_before = get_avalon_statline_before,
 	.set_device = avalon_set_device,
