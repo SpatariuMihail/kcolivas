@@ -1106,9 +1106,9 @@ static void *avalon_send_tasks(void *userdata)
 	RenameThread(threadname);
 
 	while (likely(!avalon->shutdown)) {
-		int queued, ret, idled = 0;
 		struct work *work, *tmp;
 		struct avalon_task at;
+		int queued, idled = 0;
 		struct timeval now;
 		cgtimer_t ts_start;
 		int64_t us_timeout;
@@ -1150,6 +1150,7 @@ static void *avalon_send_tasks(void *userdata)
 				/* Reset the auto_queued count if we end up
 				 * idling any miners. */
 				avalon_reset_auto(info);
+				queued++;
 				continue;
 			}
 			/* Actually queue real work here. */
@@ -1268,9 +1269,8 @@ static void *bitburner_send_tasks(void *userdata)
 			       avalon->drv->name, avalon->device_id, idled);
 		}
 	}
-	return NULL;
 #endif
-	
+	return NULL;
 }
 
 static bool avalon_prepare(struct thr_info *thr)
