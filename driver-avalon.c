@@ -1125,15 +1125,15 @@ static void *avalon_send_tasks(void *userdata)
 		queued = 0;
 		mutex_lock(&info->qlock);
 		while (42) {
+			if (queued == avalon_get_work_count) {
+				applog(LOG_DEBUG, "%s%i: Buffer full with %d work queued",
+					avalon->drv->name, avalon->device_id, queued);
+				break;
+			}
 			if (avalon_buffer_full(avalon)) {
 				/* More verbose output if queued count doesn't match. */
-				if (queued != avalon_get_work_count) {
-					applog(LOG_INFO, "%s%i: Buffer full after with %d of %d work queued",
-					       avalon->drv->name, avalon->device_id, queued, avalon_get_work_count);
-				} else {
-					applog(LOG_DEBUG, "%s%i: Buffer full with %d work queued",
-					       avalon->drv->name, avalon->device_id, queued);
-				}
+				applog(LOG_INFO, "%s%i: Buffer full with %d of %d work queued",
+				       avalon->drv->name, avalon->device_id, queued, avalon_get_work_count);
 				break;
 			}
 			if (unlikely(info->overheat)) {
