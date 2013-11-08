@@ -194,7 +194,6 @@ bool opt_bfl_noncerange;
 struct thr_info *control_thr;
 struct thr_info **mining_thr;
 static int gwsched_thr_id;
-static int stage_thr_id;
 static int watchpool_thr_id;
 static int watchdog_thr_id;
 #ifdef HAVE_CURSES
@@ -3299,11 +3298,7 @@ static void __kill_work(void)
 
 	cg_completion_timeout(&kill_mining, NULL, 3000);
 
-	forcelog(LOG_DEBUG, "Killing off stage thread");
 	/* Stop the others */
-	thr = &control_thr[stage_thr_id];
-	kill_timeout(thr);
-
 	forcelog(LOG_DEBUG, "Killing off API thread");
 	thr = &control_thr[api_thr_id];
 	kill_timeout(thr);
@@ -4246,42 +4241,6 @@ static bool hash_push(struct work *work)
 	mutex_unlock(stgd_lock);
 
 	return rc;
-}
-
-static void *stage_thread(void *userdata)
-{
-	struct thr_info *mythr = userdata;
-	bool ok = true;
-
-	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
-
-	RenameThread("stage");
-
-	while (ok) {
-		struct work *work = NULL;
-
-		applog(LOG_DEBUG, "Popping work to stage thread");
-
-		work = tq_pop(mythr->q, NULL);
-		if (unlikely(!work)) {
-			applog(LOG_ERR, "Failed to tq_pop in stage_thread");
-			ok = false;
-			break;
-		}
-		work->work_block = work_block;
-
-		test_work_current(work);
-
-		applog(LOG_DEBUG, "Pushing work to getwork queue");
-
-		if (unlikely(!hash_push(work))) {
-			applog(LOG_WARNING, "Failed to hash_push in stage_thread");
-			continue;
-		}
-	}
-
-	tq_freeze(mythr->q);
-	return NULL;
 }
 
 static void stage_work(struct work *work)
@@ -5563,8 +5522,7 @@ static void *stratum_rthread(void *userdata)
 
 		if (!parse_method(pool, s) && !parse_stratum_response(pool, s))
 			applog(LOG_INFO, "Unknown stratum msg: %s", s);
-		free(s);
-		if (pool->swork.clean) {
+		else if (pool->swork.clean) {
 			struct work *work = make_work();
 
 			/* Generate a single work item to update the current
@@ -5577,6 +5535,7 @@ static void *stratum_rthread(void *userdata)
 			test_work_current(work);
 			free_work(work);
 		}
+		free(s);
 	}
 
 out:
@@ -5853,7 +5812,7 @@ retry_stratum:
 			calc_diff(work, 0);
 			applog(LOG_DEBUG, "Pushing pooltest work to base pool");
 
-			tq_push(control_thr[stage_thr_id].q, work);
+			stage_work(work);
 			total_getworks++;
 			pool->getwork_requested++;
 			ret = true;
@@ -8141,7 +8100,7 @@ int main(int argc, char *argv[])
 	if (opt_scantime < 0)
 		opt_scantime = opt_scrypt ? 30 : 60;
 
-	total_control_threads = 9;
+	total_control_threads = 8;
 	control_thr = calloc(total_control_threads, sizeof(*thr));
 	if (!control_thr)
 		quit(1, "Failed to calloc control_thr");
@@ -8275,16 +8234,6 @@ int main(int argc, char *argv[])
 			quit(1, "Failed to calloc mining_thr[%d]", i);
 	}
 
-	stage_thr_id = 2;
-	thr = &control_thr[stage_thr_id];
-	thr->q = tq_new();
-	if (!thr->q)
-		quit(1, "Failed to tq_new");
-	/* start stage thread */
-	if (thr_info_create(thr, NULL, stage_thread, thr))
-		quit(1, "stage thread create failed");
-	pthread_detach(thr->pth);
-
 	/* Create a unique get work queue */
 	getq = tq_new();
 	if (!getq)
@@ -8389,14 +8338,14 @@ begin_bench:
 	cgtime(&total_tv_start);
 	cgtime(&total_tv_end);
 
-	watchpool_thr_id = 3;
+	watchpool_thr_id = 2;
 	thr = &control_thr[watchpool_thr_id];
 	/* start watchpool thread */
 	if (thr_info_create(thr, NULL, watchpool_thread, NULL))
 		quit(1, "watchpool thread create failed");
 	pthread_detach(thr->pth);
 
-	watchdog_thr_id = 4;
+	watchdog_thr_id = 3;
 	thr = &control_thr[watchdog_thr_id];
 	/* start watchdog thread */
 	if (thr_info_create(thr, NULL, watchdog_thread, NULL))
@@ -8405,7 +8354,7 @@ begin_bench:
 
 #ifdef HAVE_OPENCL
 	/* Create reinit gpu thread */
-	gpur_thr_id = 5;
+	gpur_thr_id = 4;
 	thr = &control_thr[gpur_thr_id];
 	thr->q = tq_new();
 	if (!thr->q)
@@ -8415,14 +8364,14 @@ begin_bench:
 #endif	
 
 	/* Create API socket thread */
-	api_thr_id = 6;
+	api_thr_id = 5;
 	thr = &control_thr[api_thr_id];
 	if (thr_info_create(thr, NULL, api_thread, thr))
 		quit(1, "API thread create failed");
 
 #ifdef USE_USBUTILS
 	if (!opt_scrypt) {
-		hotplug_thr_id = 7;
+		hotplug_thr_id = 6;
 		thr = &control_thr[hotplug_thr_id];
 		if (thr_info_create(thr, NULL, hotplug_thread, thr))
 			quit(1, "hotplug thread create failed");
@@ -8434,7 +8383,7 @@ begin_bench:
 	/* Create curses input thread for keyboard input. Create this last so
 	 * that we know all threads are created since this can call kill_work
 	 * to try and shut down all previous threads. */
-	input_thr_id = 8;
+	input_thr_id = 7;
 	thr = &control_thr[input_thr_id];
 	if (thr_info_create(thr, NULL, input_thread, thr))
 		quit(1, "input thread create failed");
@@ -8442,8 +8391,8 @@ begin_bench:
 #endif
 
 	/* Just to be sure */
-	if (total_control_threads != 9)
-		quit(1, "incorrect total_control_threads (%d) should be 9", total_control_threads);
+	if (total_control_threads != 8)
+		quit(1, "incorrect total_control_threads (%d) should be 8", total_control_threads);
 
 	/* Once everything is set up, main() becomes the getwork scheduler */
 	while (42) {
