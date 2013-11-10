@@ -2314,7 +2314,9 @@ usb_bulk_transfer(struct libusb_device_handle *dev_handle, int intinfo,
 	struct usb_epinfo *usb_epinfo;
 	struct usb_transfer ut;
 	unsigned char endpoint;
-	int err, errn;
+	int err, errn, dummy;
+	/* End of transfer and zero length packet required */
+	bool eot = false, zlp = false;
 #if DO_USB_STATS
 	struct timeval tv_start, tv_finish;
 #endif
@@ -2325,14 +2327,16 @@ usb_bulk_transfer(struct libusb_device_handle *dev_handle, int intinfo,
 
 	if (length > usb_epinfo->wMaxPacketSize)
 		length = usb_epinfo->wMaxPacketSize;
-	if ((endpoint & LIBUSB_ENDPOINT_DIR_MASK) == LIBUSB_ENDPOINT_OUT)
+	else if (length == usb_epinfo->wMaxPacketSize)
+		eot = true;
+	if ((endpoint & LIBUSB_ENDPOINT_DIR_MASK) == LIBUSB_ENDPOINT_OUT) {
+		/* If this is the last packet in a transfer and is the length
+		 * of the wMaxPacketSize then we need to send a zero length
+		 * packet to let the device know it's the end of the message.*/
+		if (eot)
+			zlp = true;
+	}
 		memcpy(buf, data, length);
-
-	/* Avoid any async transfers during shutdown to allow the polling
-	 * thread to be shut down after all existing transfers are complete */
-	if (unlikely(cgpu->shutdown))
-		return libusb_bulk_transfer(dev_handle, endpoint, data, length, transferred, timeout);
-
 
 	USBDEBUG("USB debug: @usb_bulk_transfer(%s (nodev=%s),intinfo=%d,epinfo=%d,data=%p,length=%d,timeout=%u,mode=%d,cmd=%s,seq=%d) endpoint=%d", cgpu->drv->name, bool_str(cgpu->usbinfo.nodev), intinfo, epinfo, data, length, timeout, mode, usb_cmdname(cmd), seq, (int)endpoint);
 
@@ -2386,6 +2390,8 @@ usb_bulk_transfer(struct libusb_device_handle *dev_handle, int intinfo,
 	}
 	if ((endpoint & LIBUSB_ENDPOINT_DIR_MASK) == LIBUSB_ENDPOINT_IN)
 		memcpy(data, buf, *transferred);
+	else if (zlp) /* Send a zero length packet */
+		libusb_bulk_transfer(dev_handle, endpoint, NULL, 0, &dummy, 100);
 
 	return err;
 }
