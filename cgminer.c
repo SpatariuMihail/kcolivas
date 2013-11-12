@@ -7741,6 +7741,9 @@ int main(int argc, char *argv[])
 	int i, j;
 	char *s;
 
+	/* Just renice to max priority if we can, ignoring return value */
+	nice (-20);
+
 	/* This dangerous functions tramples random dynamically allocated
 	 * variables so do it before anything at all */
 	if (unlikely(curl_global_init(CURL_GLOBAL_ALL)))
