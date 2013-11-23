@@ -346,9 +346,8 @@ static void knc_check_disabled_cores(struct knc_state *knc)
 	core = &knc->disa_cores_fifo[next_read_d];
 	cgtime(&now);
 	us = timediff(&now, &knc->last_endisable);
-	/* Leave more than the full recovery period to see if the core gets
-	 * disabled again before enabling any cores. */
-	if (us < CORE_DISA_PERIOD_US + CORE_DISA_INTERVAL)
+	/* Stagger the return of cores. */
+	if (us < CORE_DISA_PERIOD_US)
 		return;
 
 	us = timediff(&now, &core->disa_begin);
