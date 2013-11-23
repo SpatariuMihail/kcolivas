@@ -46,7 +46,6 @@
 
 /* Keep core disabled for no longer than 1 minutes */
 #define CORE_DISA_PERIOD_US	(60 * 1000000)
-#define CORE_DISA_INTERVAL	(5 * 1000000)
 
 struct spidev_context {
 	int fd;
@@ -503,9 +502,7 @@ static int64_t knc_process_response(struct thr_info *thr, struct cgpu_info *cgpu
 					}
 					successful++;
 				} else  {
-					/* Disable cores at least 5 seconds apart */
-					if ((timediff(&now, &knc->last_endisable) > CORE_DISA_INTERVAL) &&
-					    (cidx < (int)sizeof(knc->hwerrs)) &&
+					if ((cidx < (int)sizeof(knc->hwerrs)) &&
 					    (knc->hwerr_work_id[cidx] != rxbuf->responses[i].work_id)) {
 						knc->hwerr_work_id[cidx] = rxbuf->responses[i].work_id;
 						if (++(knc->hwerrs[cidx]) >= HW_ERR_LIMIT) {
