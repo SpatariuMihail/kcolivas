@@ -46,6 +46,7 @@
 
 /* Keep core disabled for no longer than 1 minutes */
 #define CORE_DISA_PERIOD_US	(60 * 1000000)
+#define CORE_DISA_INTERVAL	(5 * 1000000)
 
 struct spidev_context {
 	int fd;
@@ -145,7 +146,7 @@ struct knc_state {
 	int devices;
 	uint32_t salt;
 	uint32_t next_work_id;
-	struct timeval last_disable;
+	struct timeval last_endisable;
 
 	/* read - last read item, next is at (read + 1) mod BUFSIZE
 	 * write - next write item, last written at (write - 1) mod BUFSIZE
@@ -344,10 +345,17 @@ static void knc_check_disabled_cores(struct knc_state *knc)
 
 	core = &knc->disa_cores_fifo[next_read_d];
 	cgtime(&now);
+	us = timediff(&now, &knc->last_endisable);
+	/* Leave more than the full recovery period to see if the core gets
+	 * disabled again before enabling any cores. */
+	if (us < CORE_DISA_PERIOD_US + CORE_DISA_INTERVAL)
+		return;
+
 	us = timediff(&now, &core->disa_begin);
 	if ((us >= 0) && (us < CORE_DISA_PERIOD_US))
 		return; /* latest disabled core still not expired */
 
+	copy_time(&knc->last_endisable, &now);
 	cidx = core->asic * 256 + core->core;
 	enable_core(core->asic, core->core);
 	knc->hwerrs[cidx] = 0;
@@ -496,16 +504,17 @@ static int64_t knc_process_response(struct thr_info *thr, struct cgpu_info *cgpu
 					}
 					successful++;
 				} else  {
-					if ((timediff(&now, &knc->last_disable) > 1000000) &&
+					/* Disable cores at least 5 seconds apart */
+					if ((timediff(&now, &knc->last_endisable) > CORE_DISA_INTERVAL) &&
 					    (cidx < (int)sizeof(knc->hwerrs)) &&
 					    (knc->hwerr_work_id[cidx] != rxbuf->responses[i].work_id)) {
 						knc->hwerr_work_id[cidx] = rxbuf->responses[i].work_id;
 						if (++(knc->hwerrs[cidx]) >= HW_ERR_LIMIT) {
 						    struct core_disa_data *core;
 
-						    cgtime(&knc->last_disable);
+						    cgtime(&knc->last_endisable);
 						    core = &knc->disa_cores_fifo[knc->write_d];
-						    copy_time(&core->disa_begin, &knc->last_disable);
+						    copy_time(&core->disa_begin, &knc->last_endisable);
 						    core->asic = rxbuf->responses[i].asic;
 						    core->core = rxbuf->responses[i].core;
 						    disable_core(core->asic, core->core);
