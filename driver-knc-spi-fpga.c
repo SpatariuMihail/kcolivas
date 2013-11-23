@@ -138,6 +138,7 @@ struct core_disa_data {
 	struct timeval disa_begin;
 	uint8_t asic;
 	uint8_t core;
+	int disabled_count;
 };
 
 struct knc_state {
@@ -344,7 +345,7 @@ static void knc_check_disabled_cores(struct knc_state *knc)
 
 	core = &knc->disa_cores_fifo[next_read_d];
 	cgtime(&now);
-	us = timediff(&now, &knc->last_endisable);
+	us = timediff(&now, &knc->last_endisable) / core->disabled_count;
 	/* Stagger the return of cores. */
 	if (us < CORE_DISA_PERIOD_US)
 		return;
@@ -513,6 +514,7 @@ static int64_t knc_process_response(struct thr_info *thr, struct cgpu_info *cgpu
 						    copy_time(&core->disa_begin, &knc->last_endisable);
 						    core->asic = rxbuf->responses[i].asic;
 						    core->core = rxbuf->responses[i].core;
+						    core->disabled_count++;
 						    disable_core(core->asic, core->core);
 						    if (++(knc->disa_cnt[cidx]) >= DISA_ERR_LIMIT) {
 							    applog(LOG_WARNING,
