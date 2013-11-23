@@ -145,6 +145,7 @@ struct knc_state {
 	int devices;
 	uint32_t salt;
 	uint32_t next_work_id;
+	struct timeval last_disable;
 
 	/* read - last read item, next is at (read + 1) mod BUFSIZE
 	 * write - next write item, last written at (write - 1) mod BUFSIZE
@@ -495,14 +496,16 @@ static int64_t knc_process_response(struct thr_info *thr, struct cgpu_info *cgpu
 					}
 					successful++;
 				} else  {
-					if ((cidx < (int)sizeof(knc->hwerrs)) &&
+					if ((timediff(&now, &knc->last_disable) > 1000) &&
+					    (cidx < (int)sizeof(knc->hwerrs)) &&
 					    (knc->hwerr_work_id[cidx] != rxbuf->responses[i].work_id)) {
 						knc->hwerr_work_id[cidx] = rxbuf->responses[i].work_id;
 						if (++(knc->hwerrs[cidx]) >= HW_ERR_LIMIT) {
 						    struct core_disa_data *core;
 
+						    cgtime(&knc->last_disable);
 						    core = &knc->disa_cores_fifo[knc->write_d];
-						    copy_time(&core->disa_begin, &now);
+						    copy_time(&core->disa_begin, &knc->last_disable);
 						    core->asic = rxbuf->responses[i].asic;
 						    core->core = rxbuf->responses[i].core;
 						    disable_core(core->asic, core->core);
