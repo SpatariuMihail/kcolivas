@@ -496,7 +496,7 @@ static int64_t knc_process_response(struct thr_info *thr, struct cgpu_info *cgpu
 					}
 					successful++;
 				} else  {
-					if ((timediff(&now, &knc->last_disable) > 1000) &&
+					if ((timediff(&now, &knc->last_disable) > 1000000) &&
 					    (cidx < (int)sizeof(knc->hwerrs)) &&
 					    (knc->hwerr_work_id[cidx] != rxbuf->responses[i].work_id)) {
 						knc->hwerr_work_id[cidx] = rxbuf->responses[i].work_id;
