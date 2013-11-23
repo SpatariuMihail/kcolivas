@@ -34,8 +34,8 @@
 #define MAX_ASICS		6
 
 /* How many hardware errors in a row before disabling the core */
-#define HW_ERR_LIMIT		10
-#define DISA_ERR_LIMIT		3
+#define HW_ERR_LIMIT		3
+#define DISA_ERR_LIMIT		2
 
 #define MAX_ACTIVE_WORKS	(192 * 2 * 6 * 2)
 
@@ -44,8 +44,8 @@
 
 #define WORK_STALE_US		60000000
 
-/* Keep core disabled for no longer than 15 minutes */
-#define CORE_DISA_PERIOD_US	(15 * 60 * 1000000)
+/* Keep core disabled for no longer than 1 minutes */
+#define CORE_DISA_PERIOD_US	(60 * 1000000)
 
 struct spidev_context {
 	int fd;
@@ -342,7 +342,7 @@ static void knc_check_disabled_cores(struct knc_state *knc)
 		return; /* queue empty */
 
 	core = &knc->disa_cores_fifo[next_read_d];
-	gettimeofday(&now, NULL);
+	cgtime(&now);
 	us = timediff(&now, &core->disa_begin);
 	if ((us >= 0) && (us < CORE_DISA_PERIOD_US))
 		return; /* latest disabled core still not expired */
@@ -404,7 +404,7 @@ static int64_t knc_process_response(struct thr_info *thr, struct cgpu_info *cgpu
 		       rxbuf->response_queue_full);
 	}
 	/* move works_accepted number of items from queued_fifo to active_fifo */
-	gettimeofday(&now, NULL);
+	cgtime(&now);
 	submitted = 0;
 
 	for (i = 0; i < rxbuf->works_accepted; ++i) {
@@ -429,7 +429,7 @@ static int64_t knc_process_response(struct thr_info *thr, struct cgpu_info *cgpu
 	}
 
 	/* check for completed works and calculated nonces */
-	gettimeofday(&now, NULL);
+	cgtime(&now);
 	successful = 0;
 
 	for (i = 0; i < (int)MAX_RESPONSES_IN_BATCH; ++i) {
@@ -502,7 +502,7 @@ static int64_t knc_process_response(struct thr_info *thr, struct cgpu_info *cgpu
 						    struct core_disa_data *core;
 
 						    core = &knc->disa_cores_fifo[knc->write_d];
-						    core->disa_begin = now;
+						    copy_time(&core->disa_begin, &now);
 						    core->asic = rxbuf->responses[i].asic;
 						    core->core = rxbuf->responses[i].core;
 						    disable_core(core->asic, core->core);
@@ -556,11 +556,13 @@ static int _internal_knc_flush_fpga(struct knc_state *knc)
 static bool knc_detect_one(struct spidev_context *ctx)
 {
 	/* Scan device for ASICs */
-	int chip_id, devices = 0;
+	int chip_id, i, devices = 0;
 	struct cgpu_info *cgpu;
 	struct knc_state *knc;
 
 	for (chip_id = 0; chip_id < MAX_ASICS; ++chip_id) {
+		for (i = 0; i < 256; i++)
+			enable_core(chip_id, i);
 		/* TODO: perform the ASIC test/detection */
 		++devices;
 	}
