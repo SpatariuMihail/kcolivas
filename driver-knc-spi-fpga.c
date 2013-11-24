@@ -566,13 +566,11 @@ static int _internal_knc_flush_fpga(struct knc_state *knc)
 static bool knc_detect_one(struct spidev_context *ctx)
 {
 	/* Scan device for ASICs */
-	int chip_id, i, devices = 0;
+	int chip_id, devices = 0;
 	struct cgpu_info *cgpu;
 	struct knc_state *knc;
 
 	for (chip_id = 0; chip_id < MAX_ASICS; ++chip_id) {
-		for (i = 0; i < 256; i++)
-			enable_core(chip_id, i);
 		/* TODO: perform the ASIC test/detection */
 		++devices;
 	}
@@ -648,6 +646,24 @@ void knc_detect(bool __maybe_unused hotplug)
 				spi_free(ctx);
 		}
 	}
+}
+
+static bool knc_prepare(struct thr_info *thr)
+{
+	struct cgpu_info *cgpu = thr->cgpu;
+	int i, j;
+
+	applog(LOG_NOTICE, "KnC enabling all cores");
+
+	for (i = 0; i < MAX_ASICS; i++) {
+		for (j = 0; j < 256; j++)
+			enable_core(i, j);
+	}
+	applog(LOG_NOTICE, "KnC completed enabling all cores");
+	/* Set the device start time from now */
+	cgtime(&cgpu->dev_start_tv);
+
+	return true;
 }
 
 /* return value is number of nonces that have been checked since
@@ -766,6 +782,7 @@ struct device_drv knc_drv = {
 	.dname = "KnCminer",
 	.name = "KnC",
 	.drv_detect = knc_detect,	// Probe for devices, add with add_cgpu
+	.thread_prepare = knc_prepare,
 
 	.hash_work = hash_queued_work,
 	.scanwork = knc_scanwork,
