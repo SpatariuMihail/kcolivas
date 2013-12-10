@@ -1,6 +1,6 @@
 /*
  * Copyright 2011-2013 Andrew Smith
- * Copyright 2011-2012 Con Kolivas
+ * Copyright 2011-2013 Con Kolivas
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -28,7 +28,7 @@
 #include "miner.h"
 #include "util.h"
 
-#if defined(USE_BFLSC) || defined(USE_AVALON)
+#if defined(USE_BFLSC) || defined(USE_AVALON) || defined(USE_BITMAIN)
 #define HAVE_AN_ASIC 1
 #endif
 
@@ -135,7 +135,7 @@ static const char SEPARATOR = '|';
 #define SEPSTR "|"
 static const char GPUSEP = ',';
 
-static const char *APIVERSION = "1.29";
+static const char *APIVERSION = "1.30";
 static const char *DEAD = "Dead";
 #if defined(HAVE_OPENCL) || defined(HAVE_AN_FPGA) || defined(HAVE_AN_ASIC)
 static const char *SICK = "Sick";
@@ -180,6 +180,9 @@ static const char *DEVICECODE = ""
 #endif
 #ifdef USE_AVALON
 			"AVA "
+#endif
+#ifdef USE_BITMAIN
+			"BTM "
 #endif
 #ifdef USE_ZTEX
 			"ZTX "
@@ -422,6 +425,9 @@ static const char *JSON_PARAMETER = "parameter";
 #define MSG_ASCSETERR 120
 #endif
 
+#define MSG_INVNEG 121
+#define MSG_SETQUOTA 122
+
 enum code_severity {
 	SEVERITY_ERR,
 	SEVERITY_WARN,
@@ -582,6 +588,8 @@ struct CODES {
  { SEVERITY_SUCC,  MSG_SETCONFIG,PARAM_SET,	"Set config '%s' to %d" },
  { SEVERITY_ERR,   MSG_UNKCON,	PARAM_STR,	"Unknown config '%s'" },
  { SEVERITY_ERR,   MSG_INVNUM,	PARAM_BOTH,	"Invalid number (%d) for '%s' range is 0-9999" },
+ { SEVERITY_ERR,   MSG_INVNEG,	PARAM_BOTH,	"Invalid negative number (%d) for '%s'" },
+ { SEVERITY_SUCC,  MSG_SETQUOTA,PARAM_SET,	"Set pool '%s' to quota %d'" },
  { SEVERITY_ERR,   MSG_CONPAR,	PARAM_NONE,	"Missing config parameters 'name,N'" },
  { SEVERITY_ERR,   MSG_CONVAL,	PARAM_STR,	"Missing config value N for '%s,N'" },
  { SEVERITY_SUCC,  MSG_USBSTA,	PARAM_NONE,	"USB Statistics" },
@@ -1214,6 +1222,10 @@ static int numascs()
 		if (devices[i]->drv->drv_id == DRIVER_AVALON)
 			count++;
 #endif
+#ifdef USE_BITMAIN
+		if (devices[i]->drv->drv_id == DRIVER_BITMAIN)
+			count++;
+#endif
 #ifdef USE_BFLSC
 		if (devices[i]->drv->drv_id == DRIVER_BFLSC)
 			count++;
@@ -1232,6 +1244,10 @@ static int ascdevice(int ascid)
 	for (i = 0; i < total_devices; i++) {
 #ifdef USE_AVALON
 		if (devices[i]->drv->drv_id == DRIVER_AVALON)
+			count++;
+#endif
+#ifdef USE_BITMAIN
+		if (devices[i]->drv->drv_id == DRIVER_BITMAIN)
 			count++;
 #endif
 #ifdef USE_BFLSC
@@ -2145,6 +2161,7 @@ static void poolstatus(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __m
 		root = api_add_escape(root, "URL", pool->rpc_url, false);
 		root = api_add_string(root, "Status", status, false);
 		root = api_add_int(root, "Priority", &(pool->prio), false);
+		root = api_add_int(root, "Quota", &pool->quota, false);
 		root = api_add_string(root, "Long Poll", lp, false);
 		root = api_add_uint(root, "Getworks", &(pool->getwork_requested), false);
 		root = api_add_int(root, "Accepted", &(pool->accepted), false);
@@ -2155,6 +2172,7 @@ static void poolstatus(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __m
 		root = api_add_uint(root, "Remote Failures", &(pool->remotefail_occasions), false);
 		root = api_add_escape(root, "User", pool->rpc_user, false);
 		root = api_add_time(root, "Last Share Time", &(pool->last_share_time), false);
+		root = api_add_string(root, "Diff", pool->diff, false);
 		root = api_add_int(root, "Diff1 Shares", &(pool->diff1), false);
 		if (pool->rpc_proxy) {
 			root = api_add_const(root, "Proxy Type", proxytype(pool->rpc_proxytype), false);
@@ -2195,7 +2213,7 @@ static void summary(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __mayb
 	struct api_data *root = NULL;
 	char buf[TMPBUFSIZ];
 	bool io_open;
-	double utility, mhs, work_utility;
+	double utility, ghs, work_utility;
 
 	message(io_data, MSG_SUMM, 0, NULL, isjson);
 	io_open = io_add(io_data, isjson ? COMSTR JSON_SUMMARY : _SUMMARY COMSTR);
@@ -2204,11 +2222,12 @@ static void summary(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __mayb
 	mutex_lock(&hash_lock);
 
 	utility = total_accepted / ( total_secs ? total_secs : 1 ) * 60;
-	mhs = total_mhashes_done / total_secs;
+	ghs = total_mhashes_done / 1000 / total_secs;
 	work_utility = total_diff1 / ( total_secs ? total_secs : 1 ) * 60;
 
 	root = api_add_elapsed(root, "Elapsed", &(total_secs), true);
-	root = api_add_mhs(root, "MHS av", &(mhs), false);
+	root = api_add_mhs(root, "GHS 5s", &(g_displayed_rolling), false);
+	root = api_add_mhs(root, "GHS av", &(ghs), false);
 	root = api_add_uint(root, "Found Blocks", &(found_blocks), true);
 	root = api_add_int(root, "Getworks", &(total_getworks), true);
 	root = api_add_int(root, "Accepted", &(total_accepted), true);
@@ -2615,6 +2634,48 @@ static void poolpriority(struct io_data *io_data, __maybe_unused SOCKETTYPE c, c
 		switch_pools(NULL);
 
 	message(io_data, MSG_POOLPRIO, 0, NULL, isjson);
+}
+
+static void poolquota(struct io_data *io_data, __maybe_unused SOCKETTYPE c, char *param, bool isjson, __maybe_unused char group)
+{
+	struct pool *pool;
+	int quota, id;
+	char *comma;
+
+	if (total_pools == 0) {
+		message(io_data, MSG_NOPOOL, 0, NULL, isjson);
+		return;
+	}
+
+	if (param == NULL || *param == '\0') {
+		message(io_data, MSG_MISPID, 0, NULL, isjson);
+		return;
+	}
+
+	comma = strchr(param, ',');
+	if (!comma) {
+		message(io_data, MSG_CONVAL, 0, param, isjson);
+		return;
+	}
+
+	*(comma++) = '\0';
+
+	id = atoi(param);
+	if (id < 0 || id >= total_pools) {
+		message(io_data, MSG_INVPID, id, NULL, isjson);
+		return;
+	}
+	pool = pools[id];
+
+	quota = atoi(comma);
+	if (quota < 0) {
+		message(io_data, MSG_INVNEG, quota, pool->rpc_url, isjson);
+		return;
+	}
+
+	pool->quota = quota;
+	adjust_quota_gcd();
+	message(io_data, MSG_SETQUOTA, quota, pool->rpc_url, isjson);
 }
 
 static void disablepool(struct io_data *io_data, __maybe_unused SOCKETTYPE c, char *param, bool isjson, __maybe_unused char group)
@@ -3831,6 +3892,7 @@ struct CMDS {
 	{ "switchpool",		switchpool,	true },
 	{ "addpool",		addpool,	true },
 	{ "poolpriority",	poolpriority,	true },
+	{ "poolquota",		poolquota,	true },
 	{ "enablepool",		enablepool,	true },
 	{ "disablepool",	disablepool,	true },
 	{ "removepool",		removepool,	true },
