@@ -337,6 +337,16 @@ enum usb_cmds {
 struct device_drv;
 struct cgpu_info;
 
+#ifdef USE_BITMAIN
+struct cgpu_info *btm_alloc_cgpu(struct device_drv *drv, int threads);
+struct cgpu_info *btm_free_cgpu(struct cgpu_info *cgpu);
+void btm_uninit(struct cgpu_info *cgpu);
+bool btm_init(struct cgpu_info *cgpu, const char * devpath);
+void btm_detect(struct device_drv *drv, bool (*device_detect)(const char*));
+int btm_read(struct cgpu_info *cgpu, char *buf, size_t bufsize);
+int btm_write(struct cgpu_info *cgpu, char *buf, size_t bufsize);
+#endif
+
 void usb_all(int level);
 const char *usb_cmdname(enum usb_cmds cmd);
 void usb_applog(struct cgpu_info *bflsc, enum usb_cmds cmd, char *msg, int amount, int err);

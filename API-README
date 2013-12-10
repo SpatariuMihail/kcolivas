@@ -188,6 +188,10 @@ The list of requests - a (*) means it requires privileged access - and replies:
                               stating the results of changing pool priorities
                               See usage below
 
+ poolquota|N,Q (*)
+               none           There is no reply section just the STATUS section
+                              stating the results of changing pool quota to Q
+
  disablepool|N (*)
                none           There is no reply section just the STATUS section
                               stating the results of disabling pool N
@@ -486,6 +490,16 @@ miner.php - an example web page to access the API
 Feature Changelog for external applications using the API:
 
 
+API V1.30 (cgminer v3.4.3)
+
+Added API command:
+ 'poolquota' - Set pool quota for load-balance strategy.
+
+Modified API command:
+ 'pools' - add 'Quota'
+
+---------
+
 API V1.29 (cgminer v3.4.1)
 
 Muticast identification added to the API
@@ -578,7 +592,7 @@ Added API commands:
 Modified API commands:
  'summary' - add 'Best Share'
 
-Modifed output:
+Modified output:
  each MMQ shows up as 4 devices, each with it's own stats
 
 ----------
@@ -1244,6 +1258,28 @@ Set $mcasttimeout to the number of seconds (floating point)
 to wait for replies to the Multicast message
 N.B. the accuracy of the timing used to wait for the replies is
 ~0.1s so there's no point making it more than one decimal place
+
+---------
+
+Default:
+ $mcastretries = 0;
+
+Set $mcastretries to the number of times to retry the multicast
+
+If $mcastexpect is 0, this is simply the number of extra times
+that it will send the multicast request
+N.B. cgminer doesn't listen for multicast requests for 1000ms after
+each one it hears
+
+If $mcastexpect is > 0, it will stop looking for replies once it
+has found at least $mcastexpect rigs, but it only checks this rig
+limit each time it reaches the $mcasttimeout limit, thus it can find
+more than $mcastexpect rigs if more exist
+It will send the multicast message up to $mcastretries extra times or
+until it has found at least $mcastexpect rigs
+However, when using $mcastretries, it is possible for it to sometimes
+ignore some rigs on the network if $mcastexpect is less than the
+number of rigs on the network and some rigs are too slow to reply
 
 ---------
 

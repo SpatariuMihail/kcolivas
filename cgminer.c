@@ -72,7 +72,7 @@
 	#include <sys/wait.h>
 #endif
 
-#if defined(USE_BITFORCE) || defined(USE_ICARUS) || defined(USE_AVALON) || defined(USE_BITMAIN) || defined(USE_MODMINER)
+#if defined(USE_BITFORCE) || defined(USE_ICARUS) || defined(USE_BMSC) || defined(USE_AVALON) || defined(USE_BITMAIN) || defined(USE_MODMINER)
 #	define USE_FPGA
 #elif defined(USE_ZTEX)
 #	define USE_FPGA
@@ -104,6 +104,7 @@ int opt_scantime = -1;
 int opt_expiry = 120;
 static const bool opt_time = true;
 unsigned long long global_hashrate;
+unsigned long global_quota_gcd = 1;
 
 #if defined(HAVE_OPENCL) || defined(USE_USBUTILS)
 int nDevs;
@@ -160,6 +161,11 @@ bool opt_disable_pool;
 static bool no_work;
 char *opt_icarus_options = NULL;
 char *opt_icarus_timing = NULL;
+char *opt_bmsc_options = NULL;
+char *opt_bmsc_timing = NULL;
+char *opt_bmsc_freq = NULL;
+char *opt_bmsc_rdreg = NULL;
+bool opt_bmsc_rdworktest = false;
 bool opt_worktime;
 #ifdef USE_AVALON
 char *opt_avalon_options = NULL;
@@ -230,6 +236,7 @@ pthread_cond_t gws_cond;
 
 double total_mhashes_done;
 static struct timeval total_tv_start, total_tv_end;
+double g_displayed_rolling = 0;
 
 cglock_t control_lock;
 pthread_mutex_t stats_lock;
@@ -240,7 +247,7 @@ int total_getworks, total_stale, total_discarded;
 double total_diff_accepted, total_diff_rejected, total_diff_stale;
 static int staged_rollable;
 unsigned int new_blocks;
-static unsigned int work_block;
+static unsigned int work_block = 0;
 unsigned int found_blocks;
 
 unsigned int local_work;
@@ -318,7 +325,7 @@ struct sigaction termhandler, inthandler;
 
 struct thread_q *getq;
 
-static int total_work = 0;
+static int total_work;
 struct work *staged_work = NULL;
 
 struct schedtime {
@@ -495,6 +502,47 @@ static char *getwork_req = "{\"method\": \"getwork\", \"params\": [], \"id\":0}\
 
 static char *gbt_req = "{\"id\": 0, \"method\": \"getblocktemplate\", \"params\": [{\"capabilities\": [\"coinbasetxn\", \"workid\", \"coinbase/append\"]}]}\n";
 
+/* Adjust all the pools' quota to the greatest common denominator after a pool
+ * has been added or the quotas changed. */
+void adjust_quota_gcd(void)
+{
+	unsigned long gcd, lowest_quota = ~0UL, quota;
+	struct pool *pool;
+	int i;
+
+	for (i = 0; i < total_pools; i++) {
+		pool = pools[i];
+		quota = pool->quota;
+		if (!quota)
+			continue;
+		if (quota < lowest_quota)
+			lowest_quota = quota;
+	}
+
+	if (likely(lowest_quota < ~0UL)) {
+		gcd = lowest_quota;
+		for (i = 0; i < total_pools; i++) {
+			pool = pools[i];
+			quota = pool->quota;
+			if (!quota)
+				continue;
+			while (quota % gcd)
+				gcd--;
+		}
+	} else
+		gcd = 1;
+
+	for (i = 0; i < total_pools; i++) {
+		pool = pools[i];
+		pool->quota_used *= global_quota_gcd;
+		pool->quota_used /= gcd;
+		pool->quota_gcd = pool->quota / gcd;
+	}
+
+	global_quota_gcd = gcd;
+	applog(LOG_DEBUG, "Global quota greatest common denominator set to %lu", gcd);
+}
+
 /* Return value is ignored if not called from add_pool_details */
 struct pool *add_pool(void)
 {
@@ -519,6 +567,8 @@ struct pool *add_pool(void)
 
 	pool->rpc_req = getwork_req;
 	pool->rpc_proxy = NULL;
+	pool->quota = 1;
+	adjust_quota_gcd();
 
 	return pool;
 }
@@ -698,7 +748,7 @@ static char *set_rr(enum pool_strategy *strategy)
  * stratum+tcp or by detecting a stratum server response */
 bool detect_stratum(struct pool *pool, char *url)
 {
-	if (!extract_sockaddr(pool, url))
+	if (!extract_sockaddr(url, &pool->sockaddr_url, &pool->stratum_port))
 		return false;
 
 	if (!strncasecmp(url, "stratum+tcp://", 14)) {
@@ -711,19 +761,20 @@ bool detect_stratum(struct pool *pool, char *url)
 	return false;
 }
 
-static char *set_url(char *arg)
+static struct pool *add_url(void)
 {
-	struct pool *pool;
-
 	total_urls++;
 	if (total_urls > total_pools)
 		add_pool();
-	pool = pools[total_urls - 1];
+	return pools[total_urls - 1];
+}
 
+static void setup_url(struct pool *pool, char *arg)
+{
 	arg = get_proxy(arg, pool);
 
 	if (detect_stratum(pool, arg))
-		return NULL;
+		return;
 
 	opt_set_charp(arg, &pool->rpc_url);
 	if (strncmp(arg, "http://", 7) &&
@@ -737,6 +788,41 @@ static char *set_url(char *arg)
 		strncat(httpinput, arg, 248);
 		pool->rpc_url = httpinput;
 	}
+}
+
+static char *set_url(char *arg)
+{
+	struct pool *pool = add_url();
+
+	setup_url(pool, arg);
+	return NULL;
+}
+
+static char *set_quota(char *arg)
+{
+	char *semicolon = strchr(arg, ';'), *url;
+	int len, qlen, quota;
+	struct pool *pool;
+
+	if (!semicolon)
+		return "No semicolon separated quota;URL pair found";
+	len = strlen(arg);
+	*semicolon = '\0';
+	qlen = strlen(arg);
+	if (!qlen)
+		return "No parameter for quota found";
+	len -= qlen + 1;
+	if (len < 1)
+		return "No parameter for URL found";
+	quota = atoi(arg);
+	if (quota < 0)
+		return "Invalid negative parameter for quota set";
+	url = arg + qlen + 1;
+	pool = add_url();
+	setup_url(pool, url);
+	pool->quota = quota;
+	applog(LOG_INFO, "Setting pool %d to quota %d", pool->pool_no, pool->quota);
+	adjust_quota_gcd();
 
 	return NULL;
 }
@@ -946,6 +1032,37 @@ static char *set_icarus_timing(const char *arg)
 }
 #endif
 
+#ifdef USE_BMSC
+static char *set_bmsc_options(const char *arg)
+{
+	opt_set_charp(arg, &opt_bmsc_options);
+
+	return NULL;
+}
+
+static char *set_bmsc_timing(const char *arg)
+{
+	opt_set_charp(arg, &opt_bmsc_timing);
+
+	return NULL;
+}
+
+static char *set_bmsc_freq(const char *arg)
+{
+	opt_set_charp(arg, &opt_bmsc_freq);
+
+	return NULL;
+}
+
+static char *set_bmsc_rdreg(const char *arg)
+{
+	opt_set_charp(arg, &opt_bmsc_rdreg);
+
+	return NULL;
+}
+
+#endif
+
 #ifdef USE_AVALON
 static char *set_avalon_options(const char *arg)
 {
@@ -1147,6 +1264,23 @@ static struct opt_table opt_config_table[] = {
 		     set_icarus_timing, NULL, NULL,
 		     opt_hidden),
 #endif
+#ifdef USE_BMSC
+	OPT_WITH_ARG("--bmsc-options",
+		     set_bmsc_options, NULL, NULL,
+		     opt_hidden),
+	OPT_WITH_ARG("--bmsc-timing",
+		     set_bmsc_timing, NULL, NULL,
+		     opt_hidden),
+	OPT_WITH_ARG("--bmsc-freq",
+		     set_bmsc_freq, NULL, NULL,
+		     opt_hidden),
+	OPT_WITH_ARG("--bmsc-rdreg",
+		     set_bmsc_rdreg, NULL, NULL,
+		     opt_hidden),
+	OPT_WITHOUT_ARG("--bmsc-rdworktest",
+		     opt_set_bool, &opt_bmsc_rdworktest,
+		     "Record work test data to file"),
+#endif
 #ifdef USE_AVALON
 	OPT_WITHOUT_ARG("--avalon-auto",
 			opt_set_bool, &opt_avalon_auto,
@@ -1171,6 +1305,12 @@ static struct opt_table opt_config_table[] = {
 		     "Set BitBurner core voltage, in millivolts"),
 #endif
 #ifdef USE_BITMAIN
+	OPT_WITH_ARG("--bitmain-dev",
+			set_bitmain_dev, NULL, NULL,
+			"Set bitmain device (default: usb mode, other windows: COM1 or linux: /dev/bitmain-asic)"),
+	OPT_WITHOUT_ARG("--bitmain-hwerror",
+			opt_set_bool, &opt_bitmain_hwerror,
+			"Set bitmain device detect hardware error"),
 	OPT_WITHOUT_ARG("--bitmain-auto",
 			opt_set_bool, &opt_bitmain_auto,
 			"Adjust bitmain overclock frequency dynamically for best hashrate"),
@@ -1192,7 +1332,7 @@ static struct opt_table opt_config_table[] = {
 #endif
 	OPT_WITHOUT_ARG("--load-balance",
 		     set_loadbalance, &pool_strategy,
-		     "Change multipool strategy from failover to efficiency based balance"),
+		     "Change multipool strategy from failover to quota based balance"),
 	OPT_WITH_ARG("--log|-l",
 		     set_int_0_to_9999, opt_show_intval, &opt_log_interval,
 		     "Interval in seconds between log output"),
@@ -1244,6 +1384,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--quiet|-q",
 			opt_set_bool, &opt_quiet,
 			"Disable logging output, display status and errors"),
+	OPT_WITH_ARG("--quota|-U",
+		     set_quota, NULL, NULL,
+		     "quota;URL combination for server with load-balance strategy quotas"),
 	OPT_WITHOUT_ARG("--real-quiet",
 			opt_set_bool, &opt_realquiet,
 			"Disable all output"),
@@ -1526,6 +1669,9 @@ static char *opt_verusage_and_exit(const char *extra)
 #endif
 #ifdef USE_ICARUS
 		"icarus "
+#endif
+#ifdef USE_BMSC
+		"bmsc "
 #endif
 #ifdef USE_MODMINER
 		"modminer "
@@ -2194,7 +2340,7 @@ static void curses_print_status(void)
 		local_work, total_go, total_ro);
 	wclrtoeol(statuswin);
 	if ((pool_strategy == POOL_LOADBALANCE  || pool_strategy == POOL_BALANCE) && total_pools > 1) {
-		cg_mvwprintw(statuswin, 4, 0, " Connected to multiple pools with%s LP",
+		cg_mvwprintw(statuswin, 4, 0, " Connected to multiple pools with%s block change notify",
 			have_longpoll ? "": "out");
 	} else if (pool->has_stratum) {
 		cg_mvwprintw(statuswin, 4, 0, " Connected to %s diff %s with stratum as user %s",
@@ -2527,8 +2673,10 @@ share_result(json_t *val, json_t *res, json_t *err, const struct work *work,
 		}
 		/* If we know we found the block we know better than anyone
 		 * that new work is needed. */
-		if (unlikely(work->block))
+		if (unlikely(work->block)) {
+			applog(LOG_ERR, "share_result restart_threads");
 			restart_threads();
+		}
 	} else {
 		mutex_lock(&stats_lock);
 		cgpu->rejected++;
@@ -2576,7 +2724,7 @@ share_result(json_t *val, json_t *res, json_t *err, const struct work *work,
 			}
 
 			applog(LOG_NOTICE, "Rejected %s %s %d %s%s %s%s",
-			       hashshow, cgpu->drv->name, cgpu->device_id, where, reason, resubmit ? "(resubmit)" : "", worktime);
+					hashshow, cgpu->drv->name, cgpu->device_id, where, reason, resubmit ? "(resubmit)" : "", worktime);
 			sharelog(disposition, work);
 		}
 
@@ -2822,12 +2970,16 @@ static struct pool *select_balanced(struct pool *cp)
 	return ret;
 }
 
-/* Select any active pool in a rotating fashion when loadbalance is chosen */
+static struct pool *priority_pool(int choice);
+static bool pool_unusable(struct pool *pool);
+
+/* Select any active pool in a rotating fashion when loadbalance is chosen if
+ * it has any quota left. */
 static inline struct pool *select_pool(bool lagging)
 {
 	static int rotating_pool = 0;
 	struct pool *pool, *cp;
-	int tested;
+	int tested, i;
 
 	cp = current_pool();
 
@@ -2842,17 +2994,41 @@ static inline struct pool *select_pool(bool lagging)
 	/* Try to find the first pool in the rotation that is usable */
 	tested = 0;
 	while (!pool && tested++ < total_pools) {
+		pool = pools[rotating_pool];
+		if (pool->quota_used++ >= pool->quota_gcd) {
+			pool->quota_used = 0;
+			pool = NULL;
+		} else {
+			if (!pool_unworkable(pool))
+				break;
+			/* Failover-only flag for load-balance means distribute
+			 * unused quota to priority pool 0. */
+			if (opt_fail_only)
+				priority_pool(0)->quota_used--;
+		}
+		pool = NULL;
 		if (++rotating_pool >= total_pools)
 			rotating_pool = 0;
-		pool = pools[rotating_pool];
-		if (!pool_unworkable(pool))
-			break;
-		pool = NULL;
 	}
+
+	/* If there are no alive pools with quota, choose according to
+	 * priority. */
+	if (!pool) {
+		for (i = 0; i < total_pools; i++) {
+			struct pool *tp = priority_pool(i);
+
+			if (!pool_unusable(tp)) {
+				pool = tp;
+				break;
+			}
+		}
+	}
+
 	/* If still nothing is usable, use the current pool */
 	if (!pool)
 		pool = cp;
 
+	applog(LOG_DEBUG, "Selecting pool %d for work", pool->pool_no);
 	return pool;
 }
 
@@ -3265,7 +3441,7 @@ static void roll_work(struct work *work)
  * prevent a copied work struct from freeing ram belonging to another struct */
 void __copy_work(struct work *work, struct work *base_work)
 {
-	int id = work->id;
+	int id = base_work->id;
 
 	clean_work(work);
 	memcpy(work, base_work, sizeof(struct work));
@@ -3581,7 +3757,7 @@ void switch_pools(struct pool *selected)
 	}
 
 	switch (pool_strategy) {
-		/* Both of these set to the master pool */
+		/* All of these set to the master pool */
 		case POOL_BALANCE:
 		case POOL_FAILOVER:
 		case POOL_LOADBALANCE:
@@ -3885,11 +4061,12 @@ static bool test_work_current(struct work *work)
 			else
 				applog(LOG_NOTICE, "New block detected on network");
 		}
+		applog(LOG_ERR, "test_work_current restart_threads");
 		restart_threads();
 	} else if (work->longpoll) {
 		work->work_block = ++work_block;
 		if (work->pool == current_pool()) {
-			applog(LOG_NOTICE, "%sLONGPOLL from pool %d requested work restart",
+			applog(LOG_ERR, "%sLONGPOLL from pool %d requested work restart",
 			       work->gbt ? "GBT " : "", work->pool->pool_no);
 			restart_threads();
 		}
@@ -3940,7 +4117,7 @@ static void *stage_thread(void *userdata)
 	while (ok) {
 		struct work *work = NULL;
 
-		applog(LOG_DEBUG, "Popping work to stage thread");
+		applog(LOG_ERR, "Popping work to stage thread");
 
 		work = tq_pop(mythr->q, NULL);
 		if (unlikely(!work)) {
@@ -3998,7 +4175,8 @@ static void display_pool_summary(struct pool *pool)
 		wlog("Pool: %s\n", pool->rpc_url);
 		if (pool->solved)
 			wlog("SOLVED %d BLOCK%s!\n", pool->solved, pool->solved > 1 ? "S" : "");
-		wlog("%s own long-poll support\n", pool->hdr_path ? "Has" : "Does not have");
+		if (!pool->has_stratum)
+			wlog("%s own long-poll support\n", pool->hdr_path ? "Has" : "Does not have");
 		wlog(" Queued work requests: %d\n", pool->getwork_requested);
 		wlog(" Share submissions: %d\n", pool->accepted + pool->rejected);
 		wlog(" Accepted shares: %d\n", pool->accepted);
@@ -4099,13 +4277,24 @@ void write_config(FILE *fcfg)
 	/* Write pool values */
 	fputs("{\n\"pools\" : [", fcfg);
 	for(i = 0; i < total_pools; i++) {
-		fprintf(fcfg, "%s\n\t{\n\t\t\"url\" : \"%s%s%s%s\",", i > 0 ? "," : "",
-			pools[i]->rpc_proxy ? json_escape((char *)proxytype(pools[i]->rpc_proxytype)) : "",
-			pools[i]->rpc_proxy ? json_escape(pools[i]->rpc_proxy) : "",
-			pools[i]->rpc_proxy ? "|" : "",
-			json_escape(pools[i]->rpc_url));
-		fprintf(fcfg, "\n\t\t\"user\" : \"%s\",", json_escape(pools[i]->rpc_user));
-		fprintf(fcfg, "\n\t\t\"pass\" : \"%s\"\n\t}", json_escape(pools[i]->rpc_pass));
+		struct pool *pool = pools[i];
+
+		if (pool->quota != 1) {
+			fprintf(fcfg, "%s\n\t{\n\t\t\"quota\" : \"%s%s%s%d;%s\",", i > 0 ? "," : "",
+				pool->rpc_proxy ? json_escape((char *)proxytype(pool->rpc_proxytype)) : "",
+				pool->rpc_proxy ? json_escape(pool->rpc_proxy) : "",
+				pool->rpc_proxy ? "|" : "",
+				pool->quota,
+				json_escape(pool->rpc_url));
+		} else {
+			fprintf(fcfg, "%s\n\t{\n\t\t\"url\" : \"%s%s%s%s\",", i > 0 ? "," : "",
+				pool->rpc_proxy ? json_escape((char *)proxytype(pool->rpc_proxytype)) : "",
+				pool->rpc_proxy ? json_escape(pool->rpc_proxy) : "",
+				pool->rpc_proxy ? "|" : "",
+				json_escape(pool->rpc_url));
+		}
+		fprintf(fcfg, "\n\t\t\"user\" : \"%s\",", json_escape(pool->rpc_user));
+		fprintf(fcfg, "\n\t\t\"pass\" : \"%s\"\n\t}", json_escape(pool->rpc_pass));
 		}
 	fputs("\n]\n", fcfg);
 
@@ -4281,6 +4470,14 @@ void write_config(FILE *fcfg)
 		fprintf(fcfg, ",\n\"icarus-options\" : \"%s\"", json_escape(opt_icarus_options));
 	if (opt_icarus_timing)
 		fprintf(fcfg, ",\n\"icarus-timing\" : \"%s\"", json_escape(opt_icarus_timing));
+	if (opt_bmsc_options)
+		fprintf(fcfg, ",\n\"bmsc-options\" : \"%s\"", json_escape(opt_bmsc_options));
+	if (opt_bmsc_timing)
+		fprintf(fcfg, ",\n\"bmsc-timing\" : \"%s\"", json_escape(opt_bmsc_timing));
+	if (opt_bmsc_freq)
+		fprintf(fcfg, ",\n\"bmsc-freq\" : \"%s\"", json_escape(opt_bmsc_freq));
+	if (opt_bmsc_rdreg)
+		fprintf(fcfg, ",\n\"bmsc-rdreg\" : \"%s\"", json_escape(opt_bmsc_rdreg));
 #ifdef USE_USBUTILS
 	if (opt_usb_select)
 		fprintf(fcfg, ",\n\"usb\" : \"%s\"", json_escape(opt_usb_select));
@@ -4394,8 +4591,9 @@ updated:
 				wlogprint("Rejecting ");
 				break;
 		}
-		wlogprint("%s Priority %d: %s  User:%s\n",
+		wlogprint("%s Quota %d Prio %d: %s  User:%s\n",
 			pool->idle? "Dead" : "Alive",
+			pool->quota,
 			pool->prio,
 			pool->rpc_url, pool->rpc_user);
 		wattroff(logwin, A_BOLD | A_DIM);
@@ -4406,7 +4604,7 @@ retry:
 	if (pool_strategy == POOL_ROTATE)
 		wlogprint("Set to rotate every %d minutes\n", opt_rotate_period);
 	wlogprint("[F]ailover only %s\n", opt_fail_only ? "enabled" : "disabled");
-	wlogprint("[A]dd pool [R]emove pool [D]isable pool [E]nable pool\n");
+	wlogprint("Pool [A]dd [R]emove [D]isable [E]nable [Q]uota change\n");
 	wlogprint("[C]hange management strategy [S]witch pool [I]nformation\n");
 	wlogprint("Or press any other key to continue\n");
 	logwin_update();
@@ -4500,6 +4698,21 @@ retry:
 		pool = pools[selected];
 		display_pool_summary(pool);
 		goto retry;
+	} else if (!strncasecmp(&input, "q", 1)) {
+		selected = curses_int("Select pool number");
+		if (selected < 0 || selected >= total_pools) {
+			wlogprint("Invalid selection\n");
+			goto retry;
+		}
+		pool = pools[selected];
+		selected = curses_int("Set quota");
+		if (selected < 0) {
+			wlogprint("Invalid negative quota\n");
+			goto retry;
+		}
+		pool->quota = selected;
+		adjust_quota_gcd();
+		goto updated;
 	} else if (!strncasecmp(&input, "f", 1)) {
 		opt_fail_only ^= true;
 		goto updated;
@@ -4873,6 +5086,7 @@ static void hashmeter(int thr_id, struct timeval *diff,
 
 	dh64 = (double)total_mhashes_done / total_secs * 1000000ull;
 	dr64 = (double)rolling * 1000000ull;
+	g_displayed_rolling = rolling / 1000.0;
 	suffix_string(dh64, displayed_hashes, sizeof(displayed_hashes), 4);
 	suffix_string(dr64, displayed_rolling, sizeof(displayed_rolling), 4);
 
@@ -5193,8 +5407,10 @@ static void *stratum_rthread(void *userdata)
 			if (!supports_resume(pool) || opt_lowmem)
 				clear_stratum_shares(pool);
 			clear_pool_work(pool);
-			if (pool == current_pool())
+			if (pool == current_pool()) {
+				applog(LOG_ERR, "stratum_rthread restart_threads");
 				restart_threads();
+			}
 
 			if (restart_stratum(pool))
 				continue;
@@ -5228,7 +5444,7 @@ static void *stratum_rthread(void *userdata)
 				 * connection is from the current pool */
 				if (pool == current_pool()) {
 					restart_threads();
-					applog(LOG_NOTICE, "Stratum from pool %d requested work restart", pool->pool_no);
+					applog(LOG_ERR, "Stratum from pool %d requested work restart", pool->pool_no);
 				}
 			} else
 				applog(LOG_NOTICE, "Stratum from pool %d detected new block", pool->pool_no);
@@ -5258,12 +5474,12 @@ static void *stratum_sthread(void *userdata)
 		quit(1, "Failed to create stratum_q in stratum_sthread");
 
 	while (42) {
-		char *noncehex, *nonce2, *nonce2hex;
 		struct stratum_share *sshare;
+		char *noncehex, *nonce2hex;
 		uint32_t *hash32, nonce;
+		char s[1024], nonce2[8];
 		struct work *work;
 		bool submitted;
-		char s[1024];
 
 		if (unlikely(pool->removed))
 			break;
@@ -5271,6 +5487,14 @@ static void *stratum_sthread(void *userdata)
 		work = tq_pop(pool->stratum_q, NULL);
 		if (unlikely(!work))
 			quit(1, "Stratum q returned empty work");
+
+		if (unlikely(work->nonce2_len > 8)) {
+			applog(LOG_ERR, "Pool %d asking for inappropriately long nonce2 length %d",
+			       pool->pool_no, (int)work->nonce2_len);
+			applog(LOG_ERR, "Not attempting to submit shares");
+			free_work(work);
+			continue;
+		}
 
 		sshare = calloc(sizeof(struct stratum_share), 1);
 		hash32 = (uint32_t *)work->hash;
@@ -5288,8 +5512,8 @@ static void *stratum_sthread(void *userdata)
 		sshare->id = swork_id++;
 		mutex_unlock(&sshare_lock);
 
-		nonce2 = alloca(work->nonce2_len);
-		memset(nonce2, 0, work->nonce2_len);
+		memset(nonce2, 0, 8);
+		/* We only use uint32_t sized nonce2 increments internally */
 		memcpy(nonce2, &work->nonce2, sizeof(uint32_t));
 		nonce2hex = bin2hex((const unsigned char *)nonce2, work->nonce2_len);
 		if (unlikely(!nonce2hex))
@@ -5364,6 +5588,8 @@ static void *stratum_sthread(void *userdata)
 
 static void init_stratum_threads(struct pool *pool)
 {
+	have_longpoll = true;
+
 	if (unlikely(pthread_create(&pool->stratum_sthread, NULL, stratum_sthread, (void *)pool)))
 		quit(1, "Failed to create stratum sthread");
 	if (unlikely(pthread_create(&pool->stratum_rthread, NULL, stratum_rthread, (void *)pool)))
@@ -5375,7 +5601,7 @@ static void *longpoll_thread(void *userdata);
 static bool stratum_works(struct pool *pool)
 {
 	applog(LOG_INFO, "Testing pool %d stratum %s", pool->pool_no, pool->stratum_url);
-	if (!extract_sockaddr(pool, pool->stratum_url))
+	if (!extract_sockaddr(pool->stratum_url, &pool->sockaddr_url, &pool->stratum_port))
 		return false;
 
 	if (!initiate_stratum(pool))
@@ -5591,15 +5817,15 @@ static struct work *hash_pop(void)
 			int rc;
 
 			cgtime(&now);
-			then.tv_sec = now.tv_sec + 5;
+			then.tv_sec = now.tv_sec + 10;
 			then.tv_nsec = now.tv_usec * 1000;
 			rc = pthread_cond_timedwait(&getq->cond, stgd_lock, &then);
 			/* Check again for !no_work as multiple threads may be
 			 * waiting on this condition and another may set the
 			 * bool separately. */
 			if (rc && !no_work) {
-				applog(LOG_WARNING, "Waiting for work to be available from pools.");
 				no_work = true;
+				applog(LOG_WARNING, "Waiting for work to be available from pools.");
 			}
 		} else
 			pthread_cond_wait(&getq->cond, stgd_lock);
@@ -5911,6 +6137,53 @@ out:
 	return ret;
 }
 
+bool submit_nonce_1(struct thr_info *thr, struct work *work, uint32_t nonce, int * nofull)
+{
+	uint32_t *work_nonce = (uint32_t *)(work->data + 64 + 12);
+	unsigned char hash2[32];
+	uint32_t *hash2_32 = (uint32_t *)hash2;
+	uint32_t diff1targ;
+	bool ret = true;
+
+	*nofull = 0;
+
+	*work_nonce = htole32(nonce);
+
+	/* Do one last check before attempting to submit the work */
+	rebuild_hash(work);
+	flip32(hash2_32, work->hash);
+
+	diff1targ = opt_scrypt ? 0x0000ffffUL : 0;
+	if (be32toh(hash2_32[7]) > diff1targ) {
+		applog(LOG_INFO, "%s%d: invalid nonce - HW error",
+		       thr->cgpu->drv->name, thr->cgpu->device_id);
+
+		//inc_hw_errors(thr);
+		return false;
+	}
+
+	mutex_lock(&stats_lock);
+	total_diff1 += work->device_diff;
+	thr->cgpu->diff1 += work->device_diff;
+	work->pool->diff1 += work->device_diff;
+	thr->cgpu->last_device_valid_work = time(NULL);
+	mutex_unlock(&stats_lock);
+
+	if (!fulltest(hash2, work->target)) {
+		*nofull = 1;
+		applog(LOG_INFO, "Share below target");
+		return false;
+	}
+	return true;
+}
+
+void submit_nonce_2(struct work *work)
+{
+	struct timeval tv_work_found;
+	cgtime(&tv_work_found);
+	submit_work_async(work, &tv_work_found);
+}
+
 static inline bool abandon_work(struct work *work, struct timeval *wdiff, uint64_t hashes)
 {
 	if (wdiff->tv_sec > opt_scantime ||
@@ -6109,20 +6382,41 @@ static void hash_sole_work(struct thr_info *mythr)
  * while still in use. */
 static void fill_queue(struct thr_info *mythr, struct cgpu_info *cgpu, struct device_drv *drv, const int thr_id)
 {
+	int i = 0;
+	int nowork = 0;
+	int queuecountdiff = 0;
 	do {
-		bool need_work;
-
+		applog(LOG_DEBUG, "------fill_queue------");
 		rd_lock(&cgpu->qlock);
-		need_work = (HASH_COUNT(cgpu->queued_work) == cgpu->queued_count);
+		queuecountdiff = HASH_COUNT(cgpu->queued_work) - cgpu->queued_count;
+		if (queuecountdiff < 0)
+			queuecountdiff = -queuecountdiff;
+			applog(LOG_DEBUG, "------needwork=%d cgpu->queued_work=%d cgpu->queued_count=%d",
+				queuecountdiff, HASH_COUNT(cgpu->queued_work), cgpu->queued_count);
 		rd_unlock(&cgpu->qlock);
 
-		if (need_work) {
-			struct work *work = get_work(mythr, thr_id);
-
-			work->device_diff = MIN(drv->max_diff, work->work_difficulty);
-			wr_lock(&cgpu->qlock);
-			HASH_ADD_INT(cgpu->queued_work, id, work);
-			wr_unlock(&cgpu->qlock);
+		if (queuecountdiff < 8) {
+			i = 0;
+			while (i < 3) {
+				struct work *work = get_work(mythr, thr_id);
+				if (work == NULL) {
+					applog(LOG_DEBUG, "------get work no work------");
+					nowork++;
+				} else {
+					nowork = 0;
+				}
+				applog(LOG_DEBUG, "get_work i=%d", i);
+				work->device_diff = MIN(drv->max_diff, work->work_difficulty);
+				wr_lock(&cgpu->qlock);
+				HASH_ADD_INT(cgpu->queued_work, id, work);
+				wr_unlock(&cgpu->qlock);
+				i++;
+			}
+		}
+		applog(LOG_DEBUG, "queuecountdiff=%d", queuecountdiff);
+		if (nowork > 10) {
+			applog(LOG_DEBUG, "------get work no total work------");
+			break;
 		}
 		/* The queue_full function should be used by the driver to
 		 * actually place work items on the physical device if it
@@ -6228,6 +6522,19 @@ struct work *find_queued_work_byid(struct cgpu_info *cgpu, uint32_t id)
 	return ret;
 }
 
+struct work *clone_queued_work_byid(struct cgpu_info *cgpu, uint32_t id)
+{
+	struct work *work, *ret = NULL;
+
+	rd_lock(&cgpu->qlock);
+	work = __find_work_byid(cgpu->queued_work, id);
+	if (work)
+		ret = copy_work(work);
+	rd_unlock(&cgpu->qlock);
+
+	return ret;
+}
+
 
 static void __work_completed(struct cgpu_info *cgpu, struct work *work)
 {
@@ -6326,6 +6633,7 @@ void hash_queued_work(struct thr_info *mythr)
 			mt_disable(mythr, thr_id, drv);
 
 		if (unlikely(mythr->work_restart)) {
+			applog(LOG_ERR, "------work restart------");
 			flush_queue(cgpu);
 			drv->flush_work(cgpu);
 		}
@@ -6839,6 +7147,7 @@ static void *watchdog_thread(void __maybe_unused *userdata)
 			} else if (now.tv_sec - thr->sick.tv_sec > 60 &&
 				   (cgpu->status == LIFE_SICK || cgpu->status == LIFE_DEAD)) {
 				/* Attempt to restart a GPU that's sick or dead once every minute */
+				applog(LOG_ERR, "Device sick more than 60");
 				cgtime(&thr->sick);
 #ifdef HAVE_ADL
 				if (adl_active && cgpu->has_adl && gpu_activity(gpu) > 50) {
@@ -7228,6 +7537,10 @@ extern struct device_drv bitforce_drv;
 extern struct device_drv icarus_drv;
 #endif
 
+#ifdef USE_BMSC
+extern struct device_drv bmsc_drv;
+#endif
+
 #ifdef USE_AVALON
 extern struct device_drv avalon_drv;
 #endif
@@ -7518,6 +7831,10 @@ static void *hotplug_thread(void __maybe_unused *userdata)
 			icarus_drv.drv_detect();
 #endif
 
+#ifdef USE_BMSC
+			bmsc_drv.drv_detect();
+#endif
+
 #ifdef USE_BFLSC
 			bflsc_drv.drv_detect();
 #endif
@@ -7753,6 +8070,11 @@ int main(int argc, char *argv[])
 		icarus_drv.drv_detect();
 #endif
 
+#ifdef USE_BMSC
+	if (!opt_scrypt)
+		bmsc_drv.drv_detect();
+#endif
+
 #ifdef USE_BFLSC
 	if (!opt_scrypt)
 		bflsc_drv.drv_detect();
@@ -7780,8 +8102,6 @@ int main(int argc, char *argv[])
 		avalon_drv.drv_detect();
 #endif
 
-	/* Detect bitmain last since it will try to claim the device regardless
-	 * as detection is unreliable. */
 #ifdef USE_BITMAIN
 	if (!opt_scrypt)
 		bitmain_drv.drv_detect();

@@ -46,12 +46,16 @@
 #define DRV_ICARUS 5
 #endif
 
+#ifdef USE_BMSC
+#define DRV_BMSC 6
+#endif
+
 #ifdef USE_AVALON
-#define DRV_AVALON 6
+#define DRV_AVALON 7
 #endif
 
 #ifdef USE_BITMAIN
-#define DRV_BITMAIN 7
+#define DRV_BITMAIN 8
 #endif
 
 #define DRV_LAST -1
@@ -65,6 +69,7 @@
 #define AVALON_TIMEOUT_MS 999
 #define BITMAIN_TIMEOUT_MS 999
 #define ICARUS_TIMEOUT_MS 999
+#define BMSC_TIMEOUT_MS 999
 #else
 #define BFLSC_TIMEOUT_MS 300
 #define BITFORCE_TIMEOUT_MS 200
@@ -72,6 +77,7 @@
 #define AVALON_TIMEOUT_MS 200
 #define BITMAIN_TIMEOUT_MS 200
 #define ICARUS_TIMEOUT_MS 200
+#define BMSC_TIMEOUT_MS 200
 #endif
 
 #define USB_READ_MINPOLL 40
@@ -109,7 +115,11 @@ static struct usb_endpoints ava_eps[] = {
 #ifdef USE_BITMAIN
 static struct usb_endpoints bmm_eps[] = {
 	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(1), 0 },
+#ifdef WIN32
 	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(2), 0 }
+#else
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(1), 0 }
+#endif
 };
 static struct usb_endpoints bms_eps[] = {
 	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(1), 0 },
@@ -118,6 +128,42 @@ static struct usb_endpoints bms_eps[] = {
 #endif
 
 #ifdef USE_ICARUS
+static struct usb_endpoints ica_eps[] = {
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(3), 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(2), 0 }
+};
+static struct usb_endpoints amu_eps[] = {
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(1), 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(1), 0 }
+};
+static struct usb_endpoints llt_eps[] = {
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(1), 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(2), 0 }
+};
+static struct usb_endpoints cmr1_eps[] = {
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(1), 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(2), 0 }
+/*
+ Interface 1
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(3), 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(4), 0 },
+
+ Interface 2
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(5), 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(6), 0 },
+
+ Interface 3
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(7), 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(8), 0 }
+*/
+};
+static struct usb_endpoints cmr2_eps[] = {
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(1), 0 },
+	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(2), 0 }
+};
+#endif
+
+#ifdef USE_BMSC
 static struct usb_endpoints ica_eps[] = {
 	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPI(3), 0 },
 	{ LIBUSB_TRANSFER_TYPE_BULK,	64,	EPO(2), 0 }
@@ -241,8 +287,13 @@ static struct usb_find_devices find_dev[] = {
 		.drv = DRV_BITMAIN,
 		.name = "BMM",
 		.ident = IDENT_BMM,
+#ifdef WIN32
 		.idVendor = IDVENDOR_FTDI,
 		.idProduct = 0x6001,
+#else
+		.idVendor = 0x4254,
+		.idProduct = 0x4153,
+#endif
 		.kernel = 0,
 		.config = 1,
 		.interface = 0,
@@ -348,6 +399,90 @@ static struct usb_find_devices find_dev[] = {
 		.epcount = ARRAY_SIZE(cmr2_eps),
 		.eps = cmr2_eps },
 #endif
+#ifdef USE_BMSC
+	{
+		.drv = DRV_BMSC,
+		.name = "ICA",
+		.ident = IDENT_ICA,
+		.idVendor = 0x067b,
+		.idProduct = 0x2303,
+		.kernel = 0,
+		.config = 1,
+		.interface = 0,
+		.timeout = BMSC_TIMEOUT_MS,
+		.latency = LATENCY_UNUSED,
+		.epcount = ARRAY_SIZE(ica_eps),
+		.eps = ica_eps },
+	{
+		.drv = DRV_BMSC,
+		.name = "AMU",
+		.ident = IDENT_AMU,
+		.idVendor = 0x10c4,
+		.idProduct = 0xea60,
+		.kernel = 0,
+		.config = 1,
+		.interface = 0,
+		.timeout = BMSC_TIMEOUT_MS,
+		.latency = LATENCY_UNUSED,
+		.epcount = ARRAY_SIZE(amu_eps),
+		.eps = amu_eps },
+	{
+		.drv = DRV_BMSC,
+		.name = "BLT",
+		.ident = IDENT_BLT,
+		.idVendor = IDVENDOR_FTDI,
+		.idProduct = 0x6001,
+		.iProduct = "FT232R USB UART",
+		.kernel = 0,
+		.config = 1,
+		.interface = 0,
+		.timeout = BMSC_TIMEOUT_MS,
+		.latency = LATENCY_STD,
+		.epcount = ARRAY_SIZE(llt_eps),
+		.eps = llt_eps },
+	// For any that don't match the above "BLT"
+	{
+		.drv = DRV_BMSC,
+		.name = "LLT",
+		.ident = IDENT_LLT,
+		.idVendor = IDVENDOR_FTDI,
+		.idProduct = 0x6001,
+		.kernel = 0,
+		.config = 1,
+		.interface = 0,
+		.timeout = BMSC_TIMEOUT_MS,
+		.latency = LATENCY_STD,
+		.epcount = ARRAY_SIZE(llt_eps),
+		.eps = llt_eps },
+	{
+		.drv = DRV_BMSC,
+		.name = "CMR",
+		.ident = IDENT_CMR1,
+		.idVendor = IDVENDOR_FTDI,
+		.idProduct = 0x8350,
+		.iProduct = "Cairnsmore1",
+		.kernel = 0,
+		.config = 1,
+		.interface = 0,
+		.timeout = BMSC_TIMEOUT_MS,
+		.latency = LATENCY_STD,
+		.epcount = ARRAY_SIZE(cmr1_eps),
+		.eps = cmr1_eps },
+	{
+		.drv = DRV_BMSC,
+		.name = "CMR",
+		.ident = IDENT_CMR2,
+		.idVendor = IDVENDOR_FTDI,
+		.idProduct = 0x6014,
+		.iProduct = "Cairnsmore1",
+		.kernel = 0,
+		.config = 1,
+		.interface = 0,
+		.timeout = BMSC_TIMEOUT_MS,
+		.latency = LATENCY_STD,
+		.epcount = ARRAY_SIZE(cmr2_eps),
+		.eps = cmr2_eps },
+#endif
 #ifdef USE_ZTEX
 // This is here so cgminer -n shows them
 // the ztex driver (as at 201303) doesn't use usbutils
@@ -382,6 +517,10 @@ extern struct device_drv modminer_drv;
 
 #ifdef USE_ICARUS
 extern struct device_drv icarus_drv;
+#endif
+
+#ifdef USE_BMSC
+extern struct device_drv bmsc_drv;
 #endif
 
 #ifdef USE_AVALON
@@ -1615,8 +1754,8 @@ static int _usb_init(struct cgpu_info *cgpu, struct libusb_device *dev, struct u
 		switch (err) {
 			case LIBUSB_ERROR_ACCESS:
 				applog(LOG_ERR,
-					"USB init open device failed, err %d, "
-					"you dont have priviledge to access %s",
+					"USB init, open device failed, err %d, "
+					"you don't have privilege to access %s",
 					err, devstr);
 				break;
 #ifdef WIN32
@@ -1985,6 +2124,11 @@ static struct usb_find_devices *usb_check(__maybe_unused struct device_drv *drv,
 #ifdef USE_ICARUS
 	if (drv->drv_id == DRIVER_ICARUS)
 		return usb_check_each(DRV_ICARUS, drv, dev);
+#endif
+
+#ifdef USE_BMSC
+	if (drv->drv_id == DRIVER_BMSC)
+		return usb_check_each(DRV_BMSC, drv, dev);
 #endif
 
 #ifdef USE_AVALON
@@ -2762,8 +2906,10 @@ int _usb_write(struct cgpu_info *cgpu, int ep, char *buf, size_t bufsiz, int *pr
 
 		tot += sent;
 
-		if (err)
+		if (err) {
+			applog(LOG_ERR, "USB debug: @_usb_write(%s (nodev=%d)) err=%d sent=%d", cgpu->drv->name, cgpu->usbinfo.nodev, err, sent);
 			break;
+		}
 
 		buf += sent;
 		bufsiz -= sent;
@@ -2781,8 +2927,10 @@ int _usb_write(struct cgpu_info *cgpu, int ep, char *buf, size_t bufsiz, int *pr
 
 	*processed = tot;
 
-	if (NODEV(err))
+	if (NODEV(err)) {
+		applog(LOG_ERR, "usb no device and release_cgpu");
 		release_cgpu(cgpu);
+	}
 
 out_unlock:
 	DEVUNLOCK(cgpu, pstate);
@@ -3196,6 +3344,7 @@ void usb_cleanup()
 			case DRIVER_BITFORCE:
 			case DRIVER_MODMINER:
 			case DRIVER_ICARUS:
+			case DRIVER_BMSC:
 			case DRIVER_AVALON:
 			case DRIVER_BITMAIN:
 				wr_lock(cgpu->usbinfo.devlock);
@@ -3343,6 +3492,12 @@ void usb_initialise()
 #ifdef USE_ICARUS
 				if (!found && strcasecmp(ptr, icarus_drv.name) == 0) {
 					drv_count[icarus_drv.drv_id].limit = lim;
+					found = true;
+				}
+#endif
+#ifdef USE_BMSC
+				if (!found && strcasecmp(ptr, bmsc_drv.name) == 0) {
+					drv_count[bmsc_drv.drv_id].limit = lim;
 					found = true;
 				}
 #endif
@@ -3773,3 +3928,169 @@ void *usb_resource_thread(void __maybe_unused *userdata)
 
 	return NULL;
 }
+
+#ifdef USE_BITMAIN
+
+struct cgpu_info *btm_alloc_cgpu(struct device_drv *drv, int threads)
+{
+	struct cgpu_info *cgpu = calloc(1, sizeof(*cgpu));
+
+	if (unlikely(!cgpu))
+		quit(1, "Failed to calloc cgpu for %s in usb_alloc_cgpu", drv->dname);
+
+	cgpu->drv = drv;
+	cgpu->deven = DEV_ENABLED;
+	cgpu->threads = threads;
+
+	cgpu->usbinfo.nodev = true;
+	cgpu->device_fd = -1;
+
+	cgpu->usbinfo.devlock = calloc(1, sizeof(*(cgpu->usbinfo.devlock)));
+	if (unlikely(!cgpu->usbinfo.devlock))
+		quit(1, "Failed to calloc devlock for %s in usb_alloc_cgpu", drv->dname);
+
+	rwlock_init(cgpu->usbinfo.devlock);
+
+	return cgpu;
+}
+
+struct cgpu_info *btm_free_cgpu(struct cgpu_info *cgpu)
+{
+	if (cgpu->drv->copy)
+		free(cgpu->drv);
+
+	if(cgpu->device_path) {
+		free(cgpu->device_path);
+	}
+
+	if (cgpu->usbinfo.devlock)
+		free(cgpu->usbinfo.devlock);
+
+	free(cgpu);
+
+	return NULL;
+}
+
+bool btm_init(struct cgpu_info *cgpu, const char * devpath)
+{
+#ifdef WIN32
+	int fd = -1;
+	signed short timeout = 1;
+	unsigned long baud = 115200;
+	bool purge = true;
+	HANDLE hSerial = NULL;
+	applog(LOG_DEBUG, "btm_init cgpu->device_fd=%d", cgpu->device_fd);
+	if(cgpu->device_fd >= 0) {
+		return false;
+	}
+	hSerial = CreateFile(devpath, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+	if (unlikely(hSerial == INVALID_HANDLE_VALUE))
+	{
+		DWORD e = GetLastError();
+		switch (e) {
+		case ERROR_ACCESS_DENIED:
+			applog(LOG_DEBUG, "Do not have user privileges required to open %s", devpath);
+			break;
+		case ERROR_SHARING_VIOLATION:
+			applog(LOG_DEBUG, "%s is already in use by another process", devpath);
+			break;
+		default:
+			applog(LOG_DEBUG, "Open %s failed, GetLastError:%d", devpath, (int)e);
+			break;
+		}
+	} else {
+		// thanks to af_newbie for pointers about this
+		COMMCONFIG comCfg = {0};
+		comCfg.dwSize = sizeof(COMMCONFIG);
+		comCfg.wVersion = 1;
+		comCfg.dcb.DCBlength = sizeof(DCB);
+		comCfg.dcb.BaudRate = baud;
+		comCfg.dcb.fBinary = 1;
+		comCfg.dcb.fDtrControl = DTR_CONTROL_ENABLE;
+		comCfg.dcb.fRtsControl = RTS_CONTROL_ENABLE;
+		comCfg.dcb.ByteSize = 8;
+
+		SetCommConfig(hSerial, &comCfg, sizeof(comCfg));
+
+		// Code must specify a valid timeout value (0 means don't timeout)
+		const DWORD ctoms = (timeout * 100);
+		COMMTIMEOUTS cto = {ctoms, 0, ctoms, 0, ctoms};
+		SetCommTimeouts(hSerial, &cto);
+
+		if (purge) {
+			PurgeComm(hSerial, PURGE_RXABORT);
+			PurgeComm(hSerial, PURGE_TXABORT);
+			PurgeComm(hSerial, PURGE_RXCLEAR);
+			PurgeComm(hSerial, PURGE_TXCLEAR);
+		}
+		fd = _open_osfhandle((intptr_t)hSerial, 0);
+	}
+#else
+	int fd = -1;
+	if(cgpu->device_fd >= 0) {
+		return false;
+	}
+	fd = open(devpath, O_RDWR|O_EXCL|O_NONBLOCK);
+#endif
+	if(fd == -1) {
+		applog(LOG_DEBUG, "%s open %s error %d",
+				cgpu->drv->dname, devpath, errno);
+		return false;
+	}
+	cgpu->device_path = strdup(devpath);
+	cgpu->device_fd = fd;
+	cgpu->usbinfo.nodev = false;
+	applog(LOG_DEBUG, "btm_init open device fd = %d", cgpu->device_fd);
+	return true;
+}
+
+void btm_uninit(struct cgpu_info *cgpu)
+{
+	applog(LOG_DEBUG, "BTM uninit %s%i", cgpu->drv->name, cgpu->device_fd);
+
+	// May have happened already during a failed initialisation
+	//  if release_cgpu() was called due to a USB NODEV(err)
+	close(cgpu->device_fd);
+	if(cgpu->device_path) {
+		free(cgpu->device_path);
+		cgpu->device_path = NULL;
+	}
+}
+
+void btm_detect(struct device_drv *drv, bool (*device_detect)(const char*))
+{
+	ssize_t count, i;
+
+	applog(LOG_DEBUG, "BTM scan devices: checking for %s devices", drv->name);
+
+	if (total_count >= total_limit) {
+		applog(LOG_DEBUG, "BTM scan devices: total limit %d reached", total_limit);
+		return;
+	}
+
+	if (drv_count[drv->drv_id].count >= drv_count[drv->drv_id].limit) {
+		applog(LOG_DEBUG,
+			"BTM scan devices: %s limit %d reached",
+			drv->dname, drv_count[drv->drv_id].limit);
+		return;
+	}
+	device_detect("asic");
+}
+
+int btm_read(struct cgpu_info *cgpu, char *buf, size_t bufsize)
+{
+	int err = 0;
+	applog(LOG_DEBUG, "btm_read ----- %d -----", bufsize);
+	err = read(cgpu->device_fd, buf, bufsize);
+	return err;
+}
+
+int btm_write(struct cgpu_info *cgpu, char *buf, size_t bufsize)
+{
+	int err = 0;
+	applog(LOG_DEBUG, "btm_write ----- %d -----", bufsize);
+	err = write(cgpu->device_fd, buf, bufsize);
+	return err;
+}
+
+#endif

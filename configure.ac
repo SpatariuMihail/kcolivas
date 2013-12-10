@@ -2,7 +2,7 @@
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 m4_define([v_maj], [3])
 m4_define([v_min], [4])
-m4_define([v_mic], [2])
+m4_define([v_mic], [3])
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 m4_define([v_ver], [v_maj.v_min.v_mic])
 m4_define([lt_rev], m4_eval(v_maj + v_min))
@@ -19,7 +19,7 @@ AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_SRCDIR([cgminer.c])
 AC_CONFIG_HEADERS([config.h])
 
-AM_INIT_AUTOMAKE([foreign])
+AM_INIT_AUTOMAKE([foreign subdir-objects])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 AC_USE_SYSTEM_EXTENSIONS
 
@@ -95,12 +95,14 @@ case $target in
     AC_DEFINE([_WIN32_WINNT], [0x0501], "WinNT version for XP+ support")
     ;;
   powerpc-*-darwin*)
+    have_darwin=true
     CFLAGS="$CFLAGS -faltivec"
     OPENCL_LIBS=""
     PTHREAD_FLAGS=""
     RT_LIBS=""
     ;;
   *-*-darwin*)
+    have_darwin=true
     OPENCL_LIBS="-framework OpenCL"
     PTHREAD_FLAGS=""
     RT_LIBS=""
@@ -251,6 +253,17 @@ if test "x$icarus" = xyes; then
 fi
 AM_CONDITIONAL([HAS_ICARUS], [test x$icarus = xyes])
 
+bmsc="no"
+
+AC_ARG_ENABLE([bmsc],
+	[AC_HELP_STRING([--enable-bmsc],[Compile support for BitMain Single Chain (default disabled)])],
+	[bmsc=$enableval]
+	)
+if test "x$bmsc" = xyes; then
+	AC_DEFINE([USE_BMSC], [1], [Defined to 1 if BitMain Single Chain support is wanted])
+fi
+AM_CONDITIONAL([HAS_BMSC], [test x$bmsc = xyes])
+
 avalon="no"
 
 AC_ARG_ENABLE([avalon],
@@ -265,11 +278,11 @@ AM_CONDITIONAL([HAS_AVALON], [test x$avalon = xyes])
 bitmain="no"
 
 AC_ARG_ENABLE([bitmain],
-	[AC_HELP_STRING([--enable-bitmain],[Compile support for BitMain (default disabled)])],
+	[AC_HELP_STRING([--enable-bitmain],[Compile support for BitMain Multi Chain (default disabled)])],
 	[bitmain=$enableval]
 	)
 if test "x$bitmain" = xyes; then
-	AC_DEFINE([USE_BITMAIN], [1], [Defined to 1 if BitMain support is wanted])
+	AC_DEFINE([USE_BITMAIN], [1], [Defined to 1 if BitMain Multi Chain support is wanted])
 fi
 AM_CONDITIONAL([HAS_BITMAIN], [test x$bitmain = xyes])
 
@@ -319,7 +332,7 @@ else
 	])
 fi
 
-if test x$avalon$bitmain$bitforce$modminer$bflsc$icarus != xnonononono; then
+if test x$avalon$bitmain$bitforce$modminer$bflsc$icarus$bmsc != xnonononono; then
 	want_usbutils=true
 else
 	want_usbutils=false
@@ -337,6 +350,10 @@ if test "x$want_usbutils" != xfalse; then
 	LIBUSB_LIBS="compat/libusb-1.0/libusb/.libs/libusb-1.0.a"
 	if test "x$have_linux" = "xtrue"; then
 		PKG_CHECK_MODULES([UDEV], [libudev], LIBUSB_LIBS+=" -ludev", [AC_MSG_ERROR([Missing required libudev dev])])
+	fi
+	if test "x$have_darwin" = "xtrue"; then
+		LIBUSB_LIBS+=" -lobjc"
+		LDFLAGS+=" -framework CoreFoundation -framework IOKit"
 	fi
 else
 	LIBUSB_LIBS=""
@@ -469,14 +486,14 @@ if test "x$opencl" != xno; then
 
 	else
 		echo "  OpenCL...............: NOT FOUND. GPU mining support DISABLED"
-		if test "x$bitforce$avalon$bitmain$icarus$ztex$modminer$bflsc" = xnononononono; then
+		if test "x$bitforce$avalon$bitmain$icarus$bmsc$ztex$modminer$bflsc" = xnononononono; then
 			AC_MSG_ERROR([No mining configured in])
 		fi
 		echo "  scrypt...............: Disabled (needs OpenCL)"
 	fi
 else
 	echo "  OpenCL...............: Detection overrided. GPU mining support DISABLED"
-	if test "x$bitforce$icarus$avalon$bitmain$ztex$modminer$bflsc" = xnononononono; then
+	if test "x$bitforce$icarus$bmsc$avalon$bitmain$ztex$modminer$bflsc" = xnononononono; then
 		AC_MSG_ERROR([No mining configured in])
 	fi
 	echo "  scrypt...............: Disabled (needs OpenCL)"
@@ -500,9 +517,9 @@ else
 fi
 
 if test "x$bitmain" = xyes; then
-	echo "  BitMain.ASICs........: Enabled"
+	echo "  BitMain.MultiChain...: Enabled"
 else
-	echo "  BitMain.ASICs........: Disabled"
+	echo "  BitMain.MultiChain...: Disabled"
 fi
 
 if test "x$bflsc" = xyes; then
@@ -521,6 +538,12 @@ if test "x$icarus" = xyes; then
 	echo "  Icarus.FPGAs.........: Enabled"
 else
 	echo "  Icarus.FPGAs.........: Disabled"
+fi
+
+if test "x$bmsc" = xyes; then
+	echo "  BitMain.SingleChain..: Enabled"
+else
+	echo "  BitMain.SingleChain..: Disabled"
 fi
 
 if test "x$modminer" = xyes; then

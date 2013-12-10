@@ -161,10 +161,16 @@ static inline int fsync (int fd)
 #endif
 #endif /* !defined(__GLXBYTEORDER_H__) */
 
+#ifndef bswap_8
+extern unsigned char bit_swap_table[256];
+#define bswap_8(x) (bit_swap_table[x])
+#endif
+
 /* This assumes htobe32 is a macro in endian.h, and if it doesn't exist, then
  * htobe64 also won't exist */
 #ifndef htobe32
 # if __BYTE_ORDER == __LITTLE_ENDIAN
+#  define htole8(x) (x)
 #  define htole16(x) (x)
 #  define htole32(x) (x)
 #  define le32toh(x) (x)
@@ -173,6 +179,7 @@ static inline int fsync (int fd)
 #  define htobe32(x) bswap_32(x)
 #  define htobe64(x) bswap_64(x)
 # elif __BYTE_ORDER == __BIG_ENDIAN
+#  define htole8(x) bswap_8(x)
 #  define htole16(x) bswap_16(x)
 #  define htole32(x) bswap_32(x)
 #  define le32toh(x) bswap_32(x)
@@ -183,6 +190,17 @@ static inline int fsync (int fd)
 #else
 #error UNKNOWN BYTE ORDER
 #endif
+
+#else
+
+# if __BYTE_ORDER == __LITTLE_ENDIAN
+#  define htole8(x) (x)
+# elif __BYTE_ORDER == __BIG_ENDIAN
+#  define htole8(x) bswap_8(x)
+#else
+#error UNKNOWN BYTE ORDER
+#endif
+
 #endif
 
 #undef unlikely
@@ -223,6 +241,7 @@ static inline int fsync (int fd)
 enum drv_driver {
 	DRIVER_OPENCL = 0,
 	DRIVER_ICARUS,
+	DRIVER_BMSC,
 	DRIVER_BITFORCE,
 	DRIVER_MODMINER,
 	DRIVER_ZTEX,
@@ -450,6 +469,7 @@ struct cgpu_info {
 	int results;
 #endif
 #ifdef USE_BITMAIN
+	int device_fd;
 	struct work **works;
 	int work_array;
 	int queued;
@@ -901,12 +921,18 @@ extern bool opt_delaynet;
 extern bool opt_restart;
 extern char *opt_icarus_options;
 extern char *opt_icarus_timing;
+extern char *opt_bmsc_options;
+extern char *opt_bmsc_timing;
+extern char *opt_bmsc_freq;
+extern char *opt_bmsc_rdreg;
+extern bool opt_bmsc_rdworktest;
 extern bool opt_worktime;
 #ifdef USE_AVALON
 extern char *opt_avalon_options;
 #endif
 #ifdef USE_BITMAIN
 extern char *opt_bitmain_options;
+extern bool opt_bitmain_hwerror;
 #endif
 #ifdef USE_USBUTILS
 extern char *opt_usb_select;
@@ -983,6 +1009,7 @@ extern int enabled_pools;
 extern void get_intrange(char *arg, int *val1, int *val2);
 extern bool detect_stratum(struct pool *pool, char *url);
 extern void print_summary(void);
+extern void adjust_quota_gcd(void);
 extern struct pool *add_pool(void);
 extern bool add_pool_details(struct pool *pool, bool live, char *url, char *user, char *pass);
 
@@ -1039,6 +1066,7 @@ extern struct strategies strategies[];
 extern enum pool_strategy pool_strategy;
 extern int opt_rotate_period;
 extern double total_mhashes_done;
+extern double g_displayed_rolling;
 extern unsigned int new_blocks;
 extern unsigned int found_blocks;
 extern int total_accepted, total_rejected, total_diff1;;
@@ -1130,6 +1158,9 @@ struct pool {
 	int solved;
 	int diff1;
 	char diff[8];
+	int quota;
+	int quota_gcd;
+	int quota_used;
 
 	double diff_accepted;
 	double diff_rejected;
@@ -1193,6 +1224,9 @@ struct pool {
 	char *sockbuf;
 	size_t sockbuf_size;
 	char *sockaddr_url; /* stripped url used for sockaddr */
+	char *sockaddr_proxy_url;
+	char *sockaddr_proxy_port;
+
 	char *nonce1;
 	unsigned char *nonce1bin;
 	size_t n1_len;
@@ -1347,12 +1381,15 @@ struct modminer_fpga_state {
 extern void get_datestamp(char *, size_t, struct timeval *);
 extern void inc_hw_errors(struct thr_info *thr);
 extern bool submit_nonce(struct thr_info *thr, struct work *work, uint32_t nonce);
+extern bool submit_nonce_1(struct thr_info *thr, struct work *work, uint32_t nonce, int * nofull);
+extern void submit_nonce_2(struct work *work);
 extern struct work *get_queued(struct cgpu_info *cgpu);
 extern struct work *__find_work_bymidstate(struct work *que, char *midstate, size_t midstatelen, char *data, int offset, size_t datalen);
 extern struct work *find_queued_work_bymidstate(struct cgpu_info *cgpu, char *midstate, size_t midstatelen, char *data, int offset, size_t datalen);
 extern struct work *clone_queued_work_bymidstate(struct cgpu_info *cgpu, char *midstate, size_t midstatelen, char *data, int offset, size_t datalen);
 extern struct work *__find_work_byid(struct work *que, uint32_t id);
 extern struct work *find_queued_work_byid(struct cgpu_info *cgpu, uint32_t id);
+extern struct work *clone_queued_work_byid(struct cgpu_info *cgpu, uint32_t id);
 extern void work_completed(struct cgpu_info *cgpu, struct work *work);
 extern struct work *take_queued_work_bymidstate(struct cgpu_info *cgpu, char *midstate, size_t midstatelen, char *data, int offset, size_t datalen);
 extern void hash_queued_work(struct thr_info *mythr);
