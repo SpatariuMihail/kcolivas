@@ -1,7 +1,7 @@
 /*
  * Copyright 2012-2013 Andrew Smith
- * Copyright 2012 Xiangfu <xiangfu@openmobilefree.com>
  * Copyright 2013 Con Kolivas <kernel@kolivas.org>
+ * Copyright 2013 Lingchao Xu <lingchao.xu@bitmaintech.com>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -10,22 +10,18 @@
  */
 
 /*
- * Those code should be works fine with V2 and V3 bitstream of Bmsc.
+ * Those code should be works fine with AntMiner U1 of Bmsc.
  * Operation:
  *   No detection implement.
  *   Input: 64B = 32B midstate + 20B fill bytes + last 12 bytes of block head.
- *   Return: send back 32bits immediately when Bmsc found a valid nonce.
+ *   Return: send back 40bits immediately when Bmsc found a valid nonce.
  *           no query protocol implemented here, if no data send back in ~11.3
  *           seconds (full cover time on 32bit nonce range by 380MH/s speed)
  *           just send another work.
  * Notice:
  *   1. Bmsc will start calculate when you push a work to them, even they
  *      are busy.
- *   2. The 2 FPGAs on Bmsc will distribute the job, one will calculate the
- *      0 ~ 7FFFFFFF, another one will cover the 80000000 ~ FFFFFFFF.
- *   3. It's possible for 2 FPGAs both find valid nonce in the meantime, the 2
- *      valid nonce will all be send back.
- *   4. Bmsc will stop work when: a valid nonce has been found or 32 bits
+ *   2. Bmsc will stop work when: a valid nonce has been found or 40 bits
  *      nonce range is completely calculated.
  */
 
@@ -49,22 +45,17 @@
 #include "miner.h"
 #include "usbutils.h"
 
-//#define BMSC_TEST_ENABLE
-
 // The serial I/O speed - Linux uses a define 'B115200' in bits/termios.h
 #define BMSC_IO_SPEED 115200
 
-// The size of a successful nonce read
-#define BMSC_READ_SIZE 4
 #define BMSC_NONCE_ARRAY_SIZE 6
 
-#define AMU_PREF_PACKET 256
-#define BLT_PREF_PACKET 512
-#define ICA_PREF_PACKET 256
+// The size of a successful nonce read
+#define BMSC_READ_SIZE 5
 
 // Ensure the sizes are correct for the Serial read
-#if (BMSC_READ_SIZE != 4)
-#error BMSC_READ_SIZE must be 4
+#if (BMSC_READ_SIZE != 5)
+#error BMSC_READ_SIZE must be 5
 #endif
 #define ASSERT1(condition) __maybe_unused static char sizeof_uint32_t_must_be_4[(condition)?1:-1]
 ASSERT1(sizeof(uint32_t) == 4);
@@ -77,6 +68,7 @@ ASSERT1(sizeof(uint32_t) == 4);
 
 // USB ms timeout to wait - user specified timeouts are multiples of this
 #define BMSC_WAIT_TIMEOUT 100
+#define BMSC_CMR2_TIMEOUT 1
 #define BMSC_READ_BUF_LEN 8192
 
 // Defined in multiples of BMSC_WAIT_TIMEOUT
@@ -96,7 +88,7 @@ ASSERT1(sizeof(uint32_t) == 4);
 // extra in case the last read is delayed
 #define BMSC_READ_REDUCE	((int)(BMSC_WAIT_TIMEOUT * 1.5))
 
-// For a standard Bmsc REV3 (to 5 places)
+// For a standard Bmsc (to 5 places)
 // Since this rounds up a the last digit - it is a slight overestimate
 // Thus the hash rate will be a VERY slight underestimate
 // (by a lot less than the displayed accuracy)
@@ -106,10 +98,14 @@ ASSERT1(sizeof(uint32_t) == 4);
 #define LANCELOT_HASH_TIME 0.0000000025000
 #define ASICMINERUSB_HASH_TIME 0.0000000029761
 // TODO: What is it?
-#define CAIRNSMORE1_HASH_TIME 0.0000000026316
+#define CAIRNSMORE1_HASH_TIME 0.0000000027000
+// Per FPGA
+#define CAIRNSMORE2_HASH_TIME 0.0000000066600
 #define NANOSEC 1000000000.0
 
-// Bmsc Rev3 doesn't send a completion message when it finishes
+#define CAIRNSMORE2_INTS 4
+
+// Bmsc doesn't send a completion message when it finishes
 // the full nonce range, so to avoid being idle we must abort the
 // work (by starting a new work item) shortly before it finishes
 //
@@ -179,12 +175,17 @@ static const char *MODE_VALUE_STR = "value";
 static const char *MODE_UNKNOWN_STR = "unknown";
 
 struct BMSC_INFO {
+	enum sub_ident ident;
+	int intinfo;
+
 	// time to calculate the golden_ob
 	uint64_t golden_hashes;
 	struct timeval golden_tv;
 
 	struct BMSC_HISTORY history[INFO_HISTORY+1];
 	uint32_t min_data_count;
+
+	int timeout;
 
 	// seconds per Hash
 	double Hs;
@@ -213,9 +214,49 @@ struct BMSC_INFO {
 	int fpga_count;
 	uint32_t nonce_mask;
 
+	uint8_t cmr2_speed;
+	bool speed_next_work;
+	bool flash_next_work;
+
 	struct work * work_queue;
 	unsigned char nonce_bin[BMSC_NONCE_ARRAY_SIZE][BMSC_READ_SIZE+1];
 	int nonce_index;
+};
+
+#define BMSC_MIDSTATE_SIZE 32
+#define BMSC_UNUSED_SIZE 16
+#define BMSC_WORK_SIZE 12
+
+#define BMSC_WORK_DATA_OFFSET 64
+
+#define BMSC_CMR2_SPEED_FACTOR 2.5
+#define BMSC_CMR2_SPEED_MIN_INT 100
+#define BMSC_CMR2_SPEED_DEF_INT 180
+#define BMSC_CMR2_SPEED_MAX_INT 220
+#define CMR2_INT_TO_SPEED(_speed) ((uint8_t)((float)_speed / BMSC_CMR2_SPEED_FACTOR))
+#define BMSC_CMR2_SPEED_MIN CMR2_INT_TO_SPEED(BMSC_CMR2_SPEED_MIN_INT)
+#define BMSC_CMR2_SPEED_DEF CMR2_INT_TO_SPEED(BMSC_CMR2_SPEED_DEF_INT)
+#define BMSC_CMR2_SPEED_MAX CMR2_INT_TO_SPEED(BMSC_CMR2_SPEED_MAX_INT)
+#define BMSC_CMR2_SPEED_INC 1
+#define BMSC_CMR2_SPEED_DEC -1
+#define BMSC_CMR2_SPEED_FAIL -10
+
+#define BMSC_CMR2_PREFIX ((uint8_t)0xB7)
+#define BMSC_CMR2_CMD_SPEED ((uint8_t)0)
+#define BMSC_CMR2_CMD_FLASH ((uint8_t)1)
+#define BMSC_CMR2_DATA_FLASH_OFF ((uint8_t)0)
+#define BMSC_CMR2_DATA_FLASH_ON ((uint8_t)1)
+#define BMSC_CMR2_CHECK ((uint8_t)0x6D)
+
+struct BMSC_WORK {
+	uint8_t midstate[BMSC_MIDSTATE_SIZE];
+	// These 4 bytes are for CMR2 bitstreams that handle MHz adjustment
+	uint8_t check;
+	uint8_t data;
+	uint8_t cmd;
+	uint8_t prefix;
+	uint8_t unused[BMSC_UNUSED_SIZE];
+	uint8_t work[BMSC_WORK_SIZE];
 };
 
 #define END_CONDITION 0x0000ffff
@@ -236,25 +277,6 @@ struct BMSC_INFO {
 // Devices are checked in the order libusb finds them which is ?
 //
 static int option_offset = -1;
-
-struct device_drv bmsc_drv;
-
-FILE * m_bmsc_test_fp[33] = {0};
-
-/*
-#define ICA_BUFSIZ (0x200)
-
-static void transfer_read(struct cgpu_info *bmsc, uint8_t request_type, uint8_t bRequest, uint16_t wValue, uint16_t wIndex, char *buf, int bufsiz, int *amount, enum usb_cmds cmd)
-{
-	int err;
-
-	err = usb_transfer_read(bmsc, request_type, bRequest, wValue, wIndex, buf, bufsiz, amount, cmd);
-
-	applog(LOG_DEBUG, "%s: cgid %d %s got err %d",
-			bmsc->drv->name, bmsc->cgminer_id,
-			usb_cmdname(cmd), err);
-}
-*/
 
 unsigned char CRC5(unsigned char *ptr, unsigned char len)
 {
@@ -316,7 +338,8 @@ static void _transfer(struct cgpu_info *bmsc, uint8_t request_type, uint8_t bReq
 	err = usb_transfer_data(bmsc, request_type, bRequest, wValue, wIndex, data, siz, cmd);
 
 	applog(LOG_DEBUG, "%s: cgid %d %s got err %d",
-			bmsc->drv->name, bmsc->cgminer_id, usb_cmdname(cmd), err);
+			bmsc->drv->name, bmsc->cgminer_id,
+			usb_cmdname(cmd), err);
 }
 
 #define transfer(bmsc, request_type, bRequest, wValue, wIndex, cmd) \
@@ -324,6 +347,7 @@ static void _transfer(struct cgpu_info *bmsc, uint8_t request_type, uint8_t bReq
 
 static void bmsc_initialise(struct cgpu_info *bmsc, int baud)
 {
+	struct BMSC_INFO *info = (struct BMSC_INFO *)(bmsc->device_data);
 	uint16_t wValue, wIndex;
 	enum sub_ident ident;
 	int interface;
@@ -331,10 +355,7 @@ static void bmsc_initialise(struct cgpu_info *bmsc, int baud)
 	if (bmsc->usbinfo.nodev)
 		return;
 
-	usb_set_cps(bmsc, baud / 10);
-	usb_enable_cps(bmsc);
-
-	interface = usb_interface(bmsc);
+	interface = _usb_interface(bmsc, info->intinfo);
 	ident = usb_ident(bmsc);
 
 	switch (ident) {
@@ -342,8 +363,6 @@ static void bmsc_initialise(struct cgpu_info *bmsc, int baud)
 		case IDENT_LLT:
 		case IDENT_CMR1:
 		case IDENT_CMR2:
-			usb_set_pps(bmsc, BLT_PREF_PACKET);
-
 			// Reset
 			transfer(bmsc, FTDI_TYPE_OUT, FTDI_REQUEST_RESET, FTDI_VALUE_RESET,
 				 interface, C_RESET);
@@ -352,7 +371,7 @@ static void bmsc_initialise(struct cgpu_info *bmsc, int baud)
 				return;
 
 			// Latency
-			usb_ftdi_set_latency(bmsc);
+			_usb_ftdi_set_latency(bmsc, info->intinfo);
 
 			if (bmsc->usbinfo.nodev)
 				return;
@@ -417,8 +436,6 @@ static void bmsc_initialise(struct cgpu_info *bmsc, int baud)
 				 interface, C_PURGERX);
 			break;
 		case IDENT_ICA:
-			usb_set_pps(bmsc, ICA_PREF_PACKET);
-
 			// Set Data Control
 			transfer(bmsc, PL2303_CTRL_OUT, PL2303_REQUEST_CTRL, PL2303_VALUE_CTRL,
 				 interface, C_SETDATA);
@@ -439,8 +456,6 @@ static void bmsc_initialise(struct cgpu_info *bmsc, int baud)
 				 interface, C_VENDOR);
 			break;
 		case IDENT_AMU:
-			usb_set_pps(bmsc, AMU_PREF_PACKET);
-
 			// Enable the UART
 			transfer(bmsc, CP210X_TYPE_OUT, CP210X_REQUEST_IFC_ENABLE,
 				 CP210X_VALUE_UART_ENABLE,
@@ -479,67 +494,47 @@ static void rev(unsigned char *s, size_t l)
 	}
 }
 
-#define ICA_NONCE_ERROR -1
-#define ICA_NONCE_OK 0
-#define ICA_NONCE_RESTART 1
-#define ICA_NONCE_TIMEOUT 2
+#define BTM_NONCE_ERROR -1
+#define BTM_NONCE_OK 0
+#define BTM_NONCE_RESTART 1
+#define BTM_NONCE_TIMEOUT 2
 
-static int bmsc_get_nonce(struct cgpu_info *bmsc, unsigned char *buf, struct timeval *tv_start, struct timeval *tv_finish, struct thr_info *thr, int read_time)
+static int bmsc_get_nonce(struct cgpu_info *bmsc, unsigned char *buf, struct timeval *tv_start,
+			    struct timeval *tv_finish, struct thr_info *thr, int read_time)
 {
-	struct timeval read_start, read_finish;
-	int err, amt;
-	int rc = 0;
-	int read_amount = BMSC_READ_SIZE+1;
-	bool first = true;
+	struct BMSC_INFO *info = (struct BMSC_INFO *)(bmsc->device_data);
+	int err, amt, rc;
 
-#ifdef BMSC_TEST_ENABLE
-	read_amount = BMSC_READ_SIZE;
-#endif
+	if (bmsc->usbinfo.nodev)
+		return BTM_NONCE_ERROR;
 
 	cgtime(tv_start);
-	while (true) {
-		if (bmsc->usbinfo.nodev)
-			return ICA_NONCE_ERROR;
+	err = usb_read_ii_timeout_cancellable(bmsc, info->intinfo, (char *)buf,
+					      BMSC_READ_SIZE, &amt, read_time,
+					      C_GETRESULTS);
+	cgtime(tv_finish);
 
-		cgtime(&read_start);
-		err = usb_read_once_timeout(bmsc, (char *)buf, read_amount, &amt, BMSC_WAIT_TIMEOUT, C_GETRESULTS);
-		cgtime(&read_finish);
-		if (err < 0 && err != LIBUSB_ERROR_TIMEOUT) {
-			applog(LOG_ERR, "%s%i: Comms error (rerr=%d amt=%d)",
-					bmsc->drv->name, bmsc->device_id, err, amt);
-			dev_error(bmsc, REASON_DEV_COMMS_ERROR);
-			return ICA_NONCE_ERROR;
-		}
-
-		if (first)
-			copy_time(tv_finish, &read_finish);
-
-		if (amt >= read_amount)
-			return ICA_NONCE_OK;
-
-		rc = SECTOMS(tdiff(&read_finish, tv_start));
-		if (rc >= read_time) {
-			if (amt > 0)
-				applog(LOG_DEBUG, "Bmsc Read: Timeout reading for %d ms", rc);
-			else
-				applog(LOG_DEBUG, "Bmsc Read: No data for %d ms", rc);
-			return ICA_NONCE_TIMEOUT;
-		}
-
-		if (thr && thr->work_restart) {
-			if (opt_debug) {
-				applog(LOG_DEBUG,
-					"Bmsc Read: Work restart at %d ms", rc);
-			}
-			return ICA_NONCE_RESTART;
-		}
-
-		if (amt > 0) {
-			buf += amt;
-			read_amount -= amt;
-			first = false;
-		}
+	if (err < 0 && err != LIBUSB_ERROR_TIMEOUT) {
+		applog(LOG_ERR, "%s%i: Comms error (rerr=%d amt=%d)", bmsc->drv->name,
+		       bmsc->device_id, err, amt);
+		dev_error(bmsc, REASON_DEV_COMMS_ERROR);
+		return BTM_NONCE_ERROR;
 	}
+
+	if (amt >= BMSC_READ_SIZE)
+		return BTM_NONCE_OK;
+
+	rc = SECTOMS(tdiff(tv_finish, tv_start));
+	if (thr && thr->work_restart) {
+		applog(LOG_DEBUG, "Bmsc Read: Work restart at %d ms", rc);
+		return BTM_NONCE_RESTART;
+	}
+
+	if (amt > 0)
+		applog(LOG_DEBUG, "Bmsc Read: Timeout reading for %d ms", rc);
+	else
+		applog(LOG_DEBUG, "Bmsc Read: No data for %d ms", rc);
+	return BTM_NONCE_TIMEOUT;
 }
 
 static const char *timing_mode_str(enum timing_mode timing_mode)
@@ -580,10 +575,11 @@ static void set_timing_mode(int this_option_offset, struct cgpu_info *bmsc, int 
 		case IDENT_AMU:
 			info->Hs = ASICMINERUSB_HASH_TIME;
 			break;
-		// TODO: ?
 		case IDENT_CMR1:
-		case IDENT_CMR2:
 			info->Hs = CAIRNSMORE1_HASH_TIME;
+			break;
+		case IDENT_CMR2:
+			info->Hs = CAIRNSMORE2_HASH_TIME;
 			break;
 		default:
 			quit(1, "Bmsc get_options() called with invalid %s ident=%d",
@@ -594,7 +590,6 @@ static void set_timing_mode(int this_option_offset, struct cgpu_info *bmsc, int 
 	info->read_time_limit = 0; // 0 = no limit
 
 	info->fullnonce = info->Hs * (((double) 0xffffffff) + 1);
-
 	info->read_time = readtimeout * BMSC_WAIT_TIMEOUT;
 
 	if (info->read_time < BMSC_READ_COUNT_MIN)
@@ -646,7 +641,6 @@ static void get_options(int this_option_offset, struct cgpu_info *bmsc, int *bau
 {
 	char buf[BUFSIZ+1];
 	char *ptr, *comma, *colon, *colon2;
-	struct BMSC_INFO *info = (struct BMSC_INFO *)(bmsc->device_data);
 	enum sub_ident ident;
 	size_t max;
 	int i, tmp;
@@ -677,7 +671,6 @@ static void get_options(int this_option_offset, struct cgpu_info *bmsc, int *bau
 	ident = usb_ident(bmsc);
 	switch (ident) {
 		case IDENT_ICA:
-			break;
 		case IDENT_BLT:
 		case IDENT_LLT:
 			*baud = BMSC_IO_SPEED;
@@ -685,8 +678,9 @@ static void get_options(int this_option_offset, struct cgpu_info *bmsc, int *bau
 		case IDENT_AMU:
 			*baud = BMSC_IO_SPEED;
 			break;
-		// TODO: ?
 		case IDENT_CMR1:
+			*baud = BMSC_IO_SPEED;
+			break;
 		case IDENT_CMR2:
 			*baud = BMSC_IO_SPEED;
 			break;
@@ -723,10 +717,9 @@ static void get_options(int this_option_offset, struct cgpu_info *bmsc, int *bau
 			}
 		}
 	}
-	applog(LOG_DEBUG, "BMSC options band=%d read time out=%d", *baud, *readtimeout);
 }
 
-static bool bmsc_detect_one(struct libusb_device *dev, struct usb_find_devices *found)
+static struct cgpu_info *bmsc_detect_one(struct libusb_device *dev, struct usb_find_devices *found)
 {
 	int this_option_offset = ++option_offset;
 	struct BMSC_INFO *info;
@@ -744,52 +737,79 @@ static bool bmsc_detect_one(struct libusb_device *dev, struct usb_find_devices *
 
 	const char golden_nonce[] = "000187a2";
 	const uint32_t golden_nonce_val = 0x000187a2;
-	unsigned char ob_bin[64], nonce_bin[BMSC_READ_SIZE+1];
+	unsigned char nonce_bin[BMSC_READ_SIZE];
+	struct BMSC_WORK workdata;
 	char *nonce_hex;
 	int baud = 115200, work_division = 1, fpga_count = 1, readtimeout = 1;
 	struct cgpu_info *bmsc;
-	int ret, err, amount, tries;
+	int ret, err, amount, tries, i;
 	bool ok;
+	bool cmr2_ok[CAIRNSMORE2_INTS];
+	int cmr2_count;
 
 	unsigned char cmd_buf[4] = {0};
 	unsigned char rdreg_buf[4] = {0};
 	unsigned char reg_data[4] = {0};
-	unsigned int tmp = 0;
-	cgtimer_t ts_start;
-	unsigned char * p = NULL;
-	int nodata = 0;
+
 	unsigned char rebuf[BMSC_READ_BUF_LEN] = {0};
 	int relen = 0;
 	int realllen = 0;
-	char msg[20480] = {0};
-	int i = 0;
+	int nodata = 0;
+	char msg[10240] = {0};
 	int sendfreqstatus = 1;
 
-	if (opt_bmsc_options == NULL)
-		return false;
+	if ((sizeof(workdata) << 1) != (sizeof(golden_ob) - 1))
+		quithere(1, "Data and golden_ob sizes don't match");
 
 	bmsc = usb_alloc_cgpu(&bmsc_drv, 1);
 
 	if (!usb_init(bmsc, dev, found))
 		goto shin;
 
-	usb_buffer_enable(bmsc);
-
 	get_options(this_option_offset, bmsc, &baud, &readtimeout);
 
-	hex2bin(ob_bin, golden_ob, sizeof(ob_bin));
+	hex2bin((void *)(&workdata), golden_ob, sizeof(workdata));
 
-	usb_read_once_timeout(bmsc, rebuf, BMSC_READ_BUF_LEN, &relen, BMSC_WAIT_TIMEOUT, C_GETRESULTS);
+	info = (struct BMSC_INFO *)calloc(1, sizeof(struct BMSC_INFO));
+	if (unlikely(!info))
+		quit(1, "Failed to malloc BMSC_INFO");
+	bmsc->device_data = (void *)info;
 
-	tries = 10;
+	info->ident = usb_ident(bmsc);
+	switch (info->ident) {
+		case IDENT_ICA:
+		case IDENT_BLT:
+		case IDENT_LLT:
+		case IDENT_AMU:
+		case IDENT_CMR1:
+			info->timeout = BMSC_WAIT_TIMEOUT;
+			break;
+		case IDENT_CMR2:
+			if (found->intinfo_count != CAIRNSMORE2_INTS) {
+				quithere(1, "CMR2 Interface count (%d) isn't expected: %d",
+						found->intinfo_count,
+						CAIRNSMORE2_INTS);
+			}
+			info->timeout = BMSC_CMR2_TIMEOUT;
+			cmr2_count = 0;
+			for (i = 0; i < CAIRNSMORE2_INTS; i++)
+				cmr2_ok[i] = false;
+			break;
+		default:
+			quit(1, "%s bmsc_detect_one() invalid %s ident=%d",
+				bmsc->drv->dname, bmsc->drv->dname, info->ident);
+	}
+
+// For CMR2 test each USB Interface
+cmr2_retry:
+	tries = 2;
 	ok = false;
-
 	while (!ok && tries-- > 0) {
 		bmsc_initialise(bmsc, baud);
 
 		if (opt_bmsc_freq) {
 			if (strcmp(opt_bmsc_freq, "0") != 0) {
-				applog(LOG_ERR, "Device detect freq parameter");
+				applog(LOG_DEBUG, "Device detect freq parameter=%s", opt_bmsc_freq);
 				if (strlen(opt_bmsc_freq) > 8 || strlen(opt_bmsc_freq) % 2 != 0 || strlen(opt_bmsc_freq) / 2 == 0) {
 					quit(1, "Invalid bmsc_freq for freq data, must be hex now: %s", opt_bmsc_freq);
 				}
@@ -802,7 +822,7 @@ static bool bmsc_detect_one(struct libusb_device *dev, struct usb_find_devices *
 				cmd_buf[1] = reg_data[0]; //16-23
 				cmd_buf[2] = reg_data[1];  //8-15
 				cmd_buf[3] = CRC5(cmd_buf, 27);
-				applog(LOG_ERR, "Set_frequency cmd_buf[1]{%02x}cmd_buf[2]{%02x}", cmd_buf[1], cmd_buf[2]);
+				applog(LOG_DEBUG, "Set_frequency cmd_buf[1]{%02x}cmd_buf[2]{%02x}", cmd_buf[1], cmd_buf[2]);
 
 				rdreg_buf[0] = 4;
 				rdreg_buf[0] |= 0x80;
@@ -810,34 +830,39 @@ static bool bmsc_detect_one(struct libusb_device *dev, struct usb_find_devices *
 				rdreg_buf[2] = 0x04;  //8-15
 				rdreg_buf[3] = CRC5(rdreg_buf, 27);
 
-				applog(LOG_ERR, "---------------------start freq----------------------");
-
-				cgsleep_prepare_r(&ts_start);
-				cgsleep_ms_r(&ts_start, 500);
+				applog(LOG_ERR, "-----------------start freq-------------------");
+				cgsleep_ms(500);
 
 				applog(LOG_ERR, "Send frequency %02x%02x%02x%02x", cmd_buf[0], cmd_buf[1], cmd_buf[2], cmd_buf[3]);
-				err = usb_write(bmsc, (char *)cmd_buf, 4, &amount, C_SENDTESTWORK);
-				if (err != LIBUSB_SUCCESS || amount != 4)
+				err = usb_write_ii(bmsc, info->intinfo, (char * )cmd_buf, 4, &amount, C_SENDWORK);
+				if (err != LIBUSB_SUCCESS || amount != 4) {
+					applog(LOG_ERR, "%s%i: Write freq Comms error (werr=%d amount=%d)", bmsc->drv->name, bmsc->device_id, err, amount);
 					continue;
-				applog(LOG_ERR, "Send frequency ok");
+				}
+				applog(LOG_DEBUG, "Send frequency ok");
 
-				cgsleep_prepare_r(&ts_start);
-				cgsleep_ms_r(&ts_start, 500);
+				cgsleep_ms(500);
 
 				applog(LOG_ERR, "Send freq getstatus %02x%02x%02x%02x", rdreg_buf[0], rdreg_buf[1], rdreg_buf[2], rdreg_buf[3]);
-				usb_read_once_timeout(bmsc, (char * )rebuf, BMSC_READ_BUF_LEN, &relen, 200, C_GETRESULTS);
-				err = usb_write(bmsc, (char *)rdreg_buf, 4, &amount, C_SENDTESTWORK);
-				if (err != LIBUSB_SUCCESS || amount != 4)
+
+				for(i = 0; i < 10; i++) {
+					usb_read_ii_timeout_cancellable(bmsc, info->intinfo, (char * )rebuf, BMSC_READ_SIZE, &relen, 100, C_GETRESULTS);
+				}
+
+				err = usb_write_ii(bmsc, info->intinfo, (char * )rdreg_buf, 4, &amount, C_SENDWORK);
+				if (err != LIBUSB_SUCCESS || amount != 4) {
+					applog(LOG_ERR, "%s%i: Write freq getstatus Comms error (werr=%d amount=%d)", bmsc->drv->name, bmsc->device_id, err, amount);
 					continue;
-				applog(LOG_ERR, "Send freq getstatus ok");
+				}
+				applog(LOG_DEBUG, "Send freq getstatus ok");
 
 				nodata = 0;
 				realllen = 0;
 				while (1) {
 					relen = 0;
-					err = usb_read_once_timeout(bmsc, (char *)rebuf+realllen, BMSC_READ_BUF_LEN, &relen, 200, C_GETRESULTS);
+					err = usb_read_ii_timeout_cancellable(bmsc, info->intinfo, (char * )rebuf + realllen, BMSC_READ_SIZE, &relen, 200, C_GETRESULTS);
 					if (err < 0 && err != LIBUSB_ERROR_TIMEOUT) {
-						applog(LOG_DEBUG, "%s%i: Read freq Comms error (rerr=%d relen=%d)", bmsc->drv->name, bmsc->device_id, err, relen);
+						applog(LOG_ERR, "%s%i: Read freq Comms error (rerr=%d relen=%d)", bmsc->drv->name, bmsc->device_id, err, relen);
 						break;
 					} else if (err == LIBUSB_ERROR_TIMEOUT) {
 						applog(LOG_DEBUG, "%s%i: Read freq Comms timeout (rerr=%d relen=%d)", bmsc->drv->name, bmsc->device_id, err, relen);
@@ -848,13 +873,15 @@ static bool bmsc_detect_one(struct libusb_device *dev, struct usb_find_devices *
 								if (sendfreqstatus) {
 									sendfreqstatus = 0;
 									applog(LOG_ERR, "Send freq getstatus %02x%02x%02x%02x", rdreg_buf[0], rdreg_buf[1], rdreg_buf[2], rdreg_buf[3]);
-									usb_read_once_timeout(bmsc, (char * )rebuf, BMSC_READ_BUF_LEN, &relen, 200, C_GETRESULTS);
-									err = usb_write(bmsc, (char *)rdreg_buf, 4, &amount, C_SENDTESTWORK);
-									if (err != LIBUSB_SUCCESS || amount != 4)
+									usb_read_ii_timeout_cancellable(bmsc, info->intinfo, (char * )rebuf, BMSC_READ_SIZE, &relen, 200, C_GETRESULTS);
+									err = usb_write_ii(bmsc, info->intinfo, (char * )rdreg_buf, 4, &amount, C_SENDWORK);
+									if (err != LIBUSB_SUCCESS || amount != 4) {
+										applog(LOG_ERR, "%s%i: Write freq getstatus Comms error (werr=%d amount=%d)", bmsc->drv->name, bmsc->device_id, err, amount);
 										continue;
-									applog(LOG_ERR, "Send freq getstatus ok");
+									}
+									applog(LOG_DEBUG, "Send freq getstatus ok");
 								} else {
-									applog(LOG_ERR, "------recv freq getstatus finish------");
+									applog(LOG_ERR, "------recv freq getstatus no data finish------");
 									break;
 								}
 							} else {
@@ -862,7 +889,7 @@ static bool bmsc_detect_one(struct libusb_device *dev, struct usb_find_devices *
 								for (i = 0; i < realllen; i += 5) {
 									applog(LOG_ERR, "Recv %d freq getstatus=%02x%02x%02x%02x%02x", i / 5 + 1, rebuf[i], rebuf[i + 1], rebuf[i + 2], rebuf[i + 3], rebuf[i + 4]);
 								}
-								applog(LOG_ERR, "------recv freq getstatus finish------");
+								applog(LOG_ERR, "--------recv freq getstatus ok finish---------");
 								break;
 							}
 						}
@@ -882,7 +909,7 @@ static bool bmsc_detect_one(struct libusb_device *dev, struct usb_find_devices *
 		}
 
 		if (opt_bmsc_rdreg) {
-			applog(LOG_ERR, "Device detect rdreg parameter");
+			applog(LOG_DEBUG, "Device detect rdreg parameter=%s", opt_bmsc_rdreg);
 			if (strlen(opt_bmsc_rdreg) > 8 || strlen(opt_bmsc_rdreg) % 2 != 0 || strlen(opt_bmsc_rdreg) / 2 == 0) {
 				quit(1, "Invalid bmsc_rdreg for reg data, must be hex now: %s", opt_bmsc_rdreg);
 			}
@@ -895,29 +922,32 @@ static bool bmsc_detect_one(struct libusb_device *dev, struct usb_find_devices *
 			rdreg_buf[1] = 0; //16-23
 			rdreg_buf[2] = reg_data[0];  //8-15
 			rdreg_buf[3] = CRC5(rdreg_buf, 27);
-			applog(LOG_ERR, "Get_status rdreg_buf[1]{%02x}rdreg_buf[2]{%02x}", rdreg_buf[1], rdreg_buf[2]);
+			applog(LOG_DEBUG, "Get_status rdreg_buf[1]{%02x}rdreg_buf[2]{%02x}", rdreg_buf[1], rdreg_buf[2]);
 
-			applog(LOG_ERR, "---------------------start rdreg----------------------");
+			applog(LOG_ERR, "-----------------start rdreg------------------");
 			applog(LOG_ERR, "Send getstatus %02x%02x%02x%02x", rdreg_buf[0], rdreg_buf[1], rdreg_buf[2], rdreg_buf[3]);
 
-			usb_read_once_timeout(bmsc, (char * )rebuf, BMSC_READ_BUF_LEN, &relen, 200, C_GETRESULTS);
-			err = usb_write(bmsc, (char *)rdreg_buf, 4, &amount, C_SENDTESTWORK);
-			if (err != LIBUSB_SUCCESS || amount != 4)
+			for(i = 0; i < 10; i++) {
+				usb_read_ii_timeout_cancellable(bmsc, info->intinfo, (char * )rebuf, BMSC_READ_SIZE, &relen, 100, C_GETRESULTS);
+			}
+
+			err = usb_write_ii(bmsc, info->intinfo, (char * )rdreg_buf, 4, &amount, C_SENDWORK);
+			if (err != LIBUSB_SUCCESS || amount != 4) {
+				applog(LOG_ERR, "%s%i: Write rdreg Comms error (werr=%d amount=%d)", bmsc->drv->name, bmsc->device_id, err, amount);
 				continue;
-			applog(LOG_ERR, "Send getstatus ok");
+			}
+			applog(LOG_DEBUG, "Send getstatus ok");
 
 			nodata = 0;
 			realllen = 0;
 			while (1) {
 				relen = 0;
-				err = usb_read_once_timeout(bmsc, (char *)rebuf+realllen, BMSC_READ_BUF_LEN, &relen, 200, C_GETRESULTS);
+				err = usb_read_ii_timeout_cancellable(bmsc, info->intinfo, (char * )rebuf + realllen, BMSC_READ_SIZE, &relen, 200, C_GETRESULTS);
 				if (err < 0 && err != LIBUSB_ERROR_TIMEOUT) {
-					applog(LOG_ERR, "%s%i: Read rdreg Comms error (rerr=%d relen=%d)",
-							bmsc->drv->name, bmsc->device_id, err, relen);
+					applog(LOG_ERR, "%s%i: Read rdreg Comms error (rerr=%d relen=%d)", bmsc->drv->name, bmsc->device_id, err, relen);
 					break;
 				} else if (err == LIBUSB_ERROR_TIMEOUT) {
-					applog(LOG_DEBUG, "%s%i: Read rdreg Comms timeout (rerr=%d relen=%d)",
-							bmsc->drv->name, bmsc->device_id, err, relen);
+					applog(LOG_DEBUG, "%s%i: Read rdreg Comms timeout (rerr=%d relen=%d)", bmsc->drv->name, bmsc->device_id, err, relen);
 
 					nodata++;
 					if (nodata > 5) {
@@ -925,7 +955,7 @@ static bool bmsc_detect_one(struct libusb_device *dev, struct usb_find_devices *
 						for (i = 0; i < realllen; i += 5) {
 							applog(LOG_ERR, "Recv %d rdreg getstatus=%02x%02x%02x%02x%02x", i / 5 + 1, rebuf[i], rebuf[i + 1], rebuf[i + 2], rebuf[i + 3], rebuf[i + 4]);
 						}
-						applog(LOG_ERR, "------recv rdreg getstatus finish------");
+						applog(LOG_ERR, "---------recv rdreg getstatus finish----------");
 						break;
 					}
 					continue;
@@ -940,32 +970,27 @@ static bool bmsc_detect_one(struct libusb_device *dev, struct usb_find_devices *
 			}
 		}
 
-		cgsleep_prepare_r(&ts_start);
-		cgsleep_ms_r(&ts_start, 500);
+		cgsleep_ms(500);
 
-		applog(LOG_ERR, "---------------------start nonce----------------------");
+		applog(LOG_ERR, "-----------------start nonce------------------");
 		applog(LOG_ERR, "Bmsc send golden nonce");
 
-		err = usb_write(bmsc, (char *)ob_bin, sizeof(ob_bin), &amount, C_SENDTESTWORK);
-		if (err != LIBUSB_SUCCESS || amount != sizeof(ob_bin))
+		err = usb_write_ii(bmsc, info->intinfo, (char *)(&workdata), sizeof(workdata), &amount, C_SENDWORK);
+		if (err != LIBUSB_SUCCESS || amount != sizeof(workdata))
 			continue;
 
 		memset(nonce_bin, 0, sizeof(nonce_bin));
-		ret = bmsc_get_nonce(bmsc, nonce_bin, &tv_start, &tv_finish, NULL, 1000);
-		if (ret != ICA_NONCE_OK) {
-			applog(LOG_ERR, "Bmsc recv golden nonce error");
+		ret = bmsc_get_nonce(bmsc, nonce_bin, &tv_start, &tv_finish, NULL, 100);
+		if (ret != BTM_NONCE_OK) {
+			applog(LOG_ERR, "Bmsc recv golden nonce timeout");
 			continue;
 		}
 
-		nonce_hex = bin2hex(nonce_bin, BMSC_READ_SIZE+1);
-		applog(LOG_ERR, "Bmsc recv nonce=%s", nonce_hex);
-		free(nonce_hex);
-
-		nonce_hex = bin2hex(nonce_bin, BMSC_READ_SIZE);
+		nonce_hex = bin2hex(nonce_bin, sizeof(nonce_bin));
 		if (strncmp(nonce_hex, golden_nonce, 8) == 0)
 			ok = true;
 		else {
-			if (tries < 0) {
+			if (tries < 0 && info->ident != IDENT_CMR2) {
 				applog(LOG_ERR, "Bmsc Detect: Test failed at %s: get %s, should: %s",
 					bmsc->device_path, nonce_hex, golden_nonce);
 			}
@@ -973,12 +998,50 @@ static bool bmsc_detect_one(struct libusb_device *dev, struct usb_find_devices *
 		free(nonce_hex);
 	}
 
-	if (!ok)
-		goto unshin;
+	if (!ok) {
+		if (info->ident != IDENT_CMR2)
+			goto unshin;
 
-	applog(LOG_DEBUG,
-		"Bmsc Detect: Test succeeded at %s: got %s",
-			bmsc->device_path, golden_nonce);
+		if (info->intinfo < CAIRNSMORE2_INTS-1) {
+			info->intinfo++;
+			goto cmr2_retry;
+		}
+	} else {
+		if (info->ident == IDENT_CMR2) {
+			applog(LOG_DEBUG,
+				"Bmsc Detect: "
+				"Test succeeded at %s i%d: got %s",
+					bmsc->device_path, info->intinfo, golden_nonce);
+
+			cmr2_ok[info->intinfo] = true;
+			cmr2_count++;
+			if (info->intinfo < CAIRNSMORE2_INTS-1) {
+				info->intinfo++;
+				goto cmr2_retry;
+			}
+		}
+	}
+
+	if (info->ident == IDENT_CMR2) {
+		if (cmr2_count == 0) {
+			applog(LOG_ERR,
+				"Bmsc Detect: Test failed at %s: for all %d CMR2 Interfaces",
+				bmsc->device_path, CAIRNSMORE2_INTS);
+			goto unshin;
+		}
+
+		// set the interface to the first one that succeeded
+		for (i = 0; i < CAIRNSMORE2_INTS; i++)
+			if (cmr2_ok[i]) {
+				info->intinfo = i;
+				break;
+			}
+	} else {
+		applog(LOG_DEBUG,
+			"Bmsc Detect: "
+			"Test succeeded at %s: got %s",
+				bmsc->device_path, golden_nonce);
+	}
 
 	/* We have a real Bmsc! */
 	if (!add_cgpu(bmsc))
@@ -989,17 +1052,20 @@ static bool bmsc_detect_one(struct libusb_device *dev, struct usb_find_devices *
 	applog(LOG_INFO, "%s%d: Found at %s",
 		bmsc->drv->name, bmsc->device_id, bmsc->device_path);
 
-	applog(LOG_DEBUG, "%s%d: Init baud=%d work_division=%d fpga_count=%d",
-		bmsc->drv->name, bmsc->device_id, baud, work_division, fpga_count);
+	if (info->ident == IDENT_CMR2) {
+		applog(LOG_INFO, "%s%d: with %d Interface%s",
+				bmsc->drv->name, bmsc->device_id,
+				cmr2_count, cmr2_count > 1 ? "s" : "");
 
-	info = (struct BMSC_INFO *)malloc(sizeof(struct BMSC_INFO));
-	if (unlikely(!info))
-		quit(1, "Failed to malloc BMSC_INFO");
+		// Assume 1 or 2 are running FPGA pairs
+		if (cmr2_count < 3) {
+			work_division = fpga_count = 2;
+			info->Hs /= 2;
+		}
+	}
 
-	bmsc->device_data = (void *)info;
-
-	// Initialise everything to zero for a new device
-	memset(info, 0, sizeof(struct BMSC_INFO));
+	applog(LOG_DEBUG, "%s%d: Init baud=%d work_division=%d fpga_count=%d readtimeout=%d",
+		bmsc->drv->name, bmsc->device_id, baud, work_division, fpga_count, readtimeout);
 
 	info->baud = baud;
 	info->work_division = work_division;
@@ -1011,20 +1077,63 @@ static bool bmsc_detect_one(struct libusb_device *dev, struct usb_find_devices *
 
 	set_timing_mode(this_option_offset, bmsc, readtimeout);
 
-	return true;
+	if (info->ident == IDENT_CMR2) {
+		int i;
+		for (i = info->intinfo + 1; i < bmsc->usbdev->found->intinfo_count; i++) {
+			struct cgpu_info *cgtmp;
+			struct BMSC_INFO *intmp;
+
+			if (!cmr2_ok[i])
+				continue;
+
+			cgtmp = usb_copy_cgpu(bmsc);
+			if (!cgtmp) {
+				applog(LOG_ERR, "%s%d: Init failed initinfo %d",
+						bmsc->drv->name, bmsc->device_id, i);
+				continue;
+			}
+
+			cgtmp->usbinfo.usbstat = USB_NOSTAT;
+
+			intmp = (struct BMSC_INFO *)malloc(sizeof(struct BMSC_INFO));
+			if (unlikely(!intmp))
+				quit(1, "Failed2 to malloc BMSC_INFO");
+
+			cgtmp->device_data = (void *)intmp;
+
+			// Initialise everything to match
+			memcpy(intmp, info, sizeof(struct BMSC_INFO));
+
+			intmp->intinfo = i;
+
+			bmsc_initialise(cgtmp, baud);
+
+			if (!add_cgpu(cgtmp)) {
+				usb_uninit(cgtmp);
+				free(intmp);
+				continue;
+			}
+
+			update_usb_stats(cgtmp);
+		}
+	}
+
+	return bmsc;
 
 unshin:
 
 	usb_uninit(bmsc);
+	free(info);
+	bmsc->device_data = NULL;
 
 shin:
 
 	bmsc = usb_free_cgpu(bmsc);
 
-	return false;
+	return NULL;
 }
 
-static void bmsc_detect()
+static void bmsc_detect(bool __maybe_unused hotplug)
 {
 	usb_detect(&bmsc_drv, bmsc_detect_one);
 }
@@ -1036,114 +1145,70 @@ static bool bmsc_prepare(__maybe_unused struct thr_info *thr)
 	return true;
 }
 
-static int checkasic(int asic_num, unsigned char nonce)
+static void cmr2_command(struct cgpu_info *bmsc, uint8_t cmd, uint8_t data)
 {
-	switch(asic_num) {
-	case 1:
-		return 1;
-	case 2:
-		switch(nonce & 0x80) {
-		case 0x80: return 2;
-		default: return 1;
-		}
-	case 4:
-		switch(nonce & 0xC0) {
-		case 0xC0: return 4;
-		case 0x80: return 3;
-		case 0x40: return 2;
-		default: return 1;
-		}
-	case 8:
-		switch(nonce & 0xE0) {
-		case 0xE0: return 8;
-		case 0xC0: return 7;
-		case 0xA0: return 6;
-		case 0x80: return 5;
-		case 0x60: return 4;
-		case 0x40: return 3;
-		case 0x20: return 2;
-		default : return 1;
-		}
-	case 16:
-		switch(nonce & 0xF0) {
-		case 0xF0: return 16;
-		case 0xE0: return 15;
-		case 0xD0: return 14;
-		case 0xC0: return 13;
-		case 0xB0: return 12;
-		case 0xA0: return 11;
-		case 0x90: return 10;
-		case 0x80: return 9;
-		case 0x70: return 8;
-		case 0x60: return 7;
-		case 0x50: return 6;
-		case 0x40: return 5;
-		case 0x30: return 4;
-		case 0x20: return 3;
-		case 0x10: return 2;
-		default : return 1;
-		}
-	case 32:
-		switch(nonce & 0xF8) {
-		case 0xF8: return 32;
-		case 0xF0: return 31;
-		case 0xE8: return 30;
-		case 0xE0: return 29;
-		case 0xD8: return 28;
-		case 0xD0: return 27;
-		case 0xC8: return 26;
-		case 0xC0: return 25;
-		case 0xB8: return 24;
-		case 0xB0: return 23;
-		case 0xA8: return 22;
-		case 0xA0: return 21;
-		case 0x98: return 20;
-		case 0x90: return 19;
-		case 0x88: return 18;
-		case 0x80: return 17;
-		case 0x78: return 16;
-		case 0x70: return 15;
-		case 0x68: return 14;
-		case 0x60: return 13;
-		case 0x58: return 12;
-		case 0x50: return 11;
-		case 0x48: return 10;
-		case 0x40: return 9;
-		case 0x38: return 8;
-		case 0x30: return 7;
-		case 0x28: return 6;
-		case 0x20: return 5;
-		case 0x18: return 4;
-		case 0x10: return 3;
-		case 0x08: return 2;
-		default : return 1;
-		}
-	default:
-		return 0;
+	struct BMSC_INFO *info = (struct BMSC_INFO *)(bmsc->device_data);
+	struct BMSC_WORK workdata;
+	int amount;
+
+	memset((void *)(&workdata), 0, sizeof(workdata));
+
+	workdata.prefix = BMSC_CMR2_PREFIX;
+	workdata.cmd = cmd;
+	workdata.data = data;
+	workdata.check = workdata.data ^ workdata.cmd ^ workdata.prefix ^ BMSC_CMR2_CHECK;
+
+	usb_write_ii(bmsc, info->intinfo, (char *)(&workdata), sizeof(workdata), &amount, C_SENDWORK);
+}
+
+static void cmr2_commands(struct cgpu_info *bmsc)
+{
+	struct BMSC_INFO *info = (struct BMSC_INFO *)(bmsc->device_data);
+
+	if (info->speed_next_work) {
+		info->speed_next_work = false;
+		cmr2_command(bmsc, BMSC_CMR2_CMD_SPEED, info->cmr2_speed);
+		return;
+	}
+
+	if (info->flash_next_work) {
+		info->flash_next_work = false;
+		cmr2_command(bmsc, BMSC_CMR2_CMD_FLASH, BMSC_CMR2_DATA_FLASH_ON);
+		cgsleep_ms(250);
+		cmr2_command(bmsc, BMSC_CMR2_CMD_FLASH, BMSC_CMR2_DATA_FLASH_OFF);
+		cgsleep_ms(250);
+		cmr2_command(bmsc, BMSC_CMR2_CMD_FLASH, BMSC_CMR2_DATA_FLASH_ON);
+		cgsleep_ms(250);
+		cmr2_command(bmsc, BMSC_CMR2_CMD_FLASH, BMSC_CMR2_DATA_FLASH_OFF);
+		return;
 	}
 }
 
-static int64_t bmsc_scanhash(struct thr_info *thr, struct work *work,
-				__maybe_unused int64_t max_nonce)
+static int64_t bmsc_scanwork(struct thr_info *thr)
 {
 	struct cgpu_info *bmsc = thr->cgpu;
 	struct BMSC_INFO *info = (struct BMSC_INFO *)(bmsc->device_data);
 	int ret, err, amount;
-	unsigned char ob_bin[64], nonce_bin[BMSC_READ_SIZE+1];
+	unsigned char nonce_bin[BMSC_READ_SIZE];
+	struct BMSC_WORK workdata;
 	char *ob_hex;
 	uint32_t nonce;
 	int64_t hash_count = 0;
-	int64_t hash_done = 0;
 	struct timeval tv_start, tv_finish, elapsed;
+	struct timeval tv_history_start, tv_history_finish;
+	double Ti, Xi;
+	int curr_hw_errors, i;
+	bool was_hw_error;
+	struct work *work;
 
-	int i = 0, count = 0, nofullcount = 0, readalllen = 0, readlen = 0, read_time = 0, nofull = 0;
-	bool nonceok = false;
-	bool noncedup = false;
-
-	char testbuf[256] = {0};
-	char testtmp[256] = {0};
-	int asicnum = 0;
-	int k = 0;
+	struct BMSC_HISTORY *history0, *history;
+	int count;
+	double Hs, W, fullnonce;
+	int read_time;
+	bool limited;
+	int64_t estimate_hashes;
+	uint32_t values;
+	int64_t hash_count_range;
 
 	// Device is gone
 	if (bmsc->usbinfo.nodev)
@@ -1151,246 +1216,87 @@ static int64_t bmsc_scanhash(struct thr_info *thr, struct work *work,
 
 	elapsed.tv_sec = elapsed.tv_usec = 0;
 
-	memset(ob_bin, 0, sizeof(ob_bin));
-	memcpy(ob_bin, work->midstate, 32);
-	memcpy(ob_bin + 52, work->data + 64, 12);
-	rev(ob_bin, 32);
-	rev(ob_bin + 52, 12);
+	work = get_work(thr, thr->id);
+	memset((void *)(&workdata), 0, sizeof(workdata));
+	memcpy(&(workdata.midstate), work->midstate, BMSC_MIDSTATE_SIZE);
+	memcpy(&(workdata.work), work->data + BMSC_WORK_DATA_OFFSET, BMSC_WORK_SIZE);
+	rev((void *)(&(workdata.midstate)), BMSC_MIDSTATE_SIZE);
+	rev((void *)(&(workdata.work)), BMSC_WORK_SIZE);
+
+	if (info->speed_next_work || info->flash_next_work)
+		cmr2_commands(bmsc);
 
 	// We only want results for the work we are about to send
-	//usb_buffer_clear(bmsc);
+	usb_buffer_clear(bmsc);
 
-	applog(LOG_DEBUG, "bmsc_scanhash start ------------");
-
-	readalllen = 0;
-	readlen = 0;
-	if(info->work_queue != NULL) {
-		while (true) {
-			if (bmsc->usbinfo.nodev)
-				return -1;
-			amount = 0;
-			memset(nonce_bin, 0, sizeof(nonce_bin));
-			err = usb_read_once_timeout(bmsc, (char *)nonce_bin+readlen, 5-readlen, &amount, BMSC_WAIT_TIMEOUT, C_GETRESULTS);
-			if (err < 0 && err != LIBUSB_ERROR_TIMEOUT) {
-				applog(LOG_ERR, "%s%i: Comms error (rerr=%d amt=%d)", bmsc->drv->name, bmsc->device_id, err, amount);
-				dev_error(bmsc, REASON_DEV_COMMS_ERROR);
-				return 0;
-			}
-			if (amount > 0) {
-				readalllen += amount;
-				readlen += amount;
-				if (readlen >= 5) {
-					nonceok = false;
-
-					memcpy((char *) &nonce, nonce_bin, BMSC_READ_SIZE);
-					noncedup = false;
-					for(i = 0; i < BMSC_NONCE_ARRAY_SIZE; i++) {
-						if(memcmp(nonce_bin, info->nonce_bin[i], BMSC_READ_SIZE) == 0) {
-							noncedup = true;
-							break;
-						}
-					}
-					if (!noncedup) {
-						if(info->nonce_index < 0 || info->nonce_index >= BMSC_NONCE_ARRAY_SIZE)
-							info->nonce_index = 0;
-
-						memcpy(info->nonce_bin[info->nonce_index], nonce_bin, BMSC_READ_SIZE);
-						info->nonce_index++;
-
-						nonce = htobe32(nonce);
-
-						nofull = 0;
-						if (submit_nonce_1(thr, info->work_queue, nonce, &nofull)) {
-							applog(LOG_DEBUG, "Bmsc nonce(0x%08x) match old work", nonce);
-							submit_nonce_2(info->work_queue);
-							nonceok = true;
-						} else {
-							if(!nofull) {
-								applog(LOG_DEBUG, "Bmsc nonce(0x%08x) not match old work", nonce);
-								usb_buffer_clear(bmsc);
-								inc_hw_errors(thr);
-								break;
-							} else {
-								nofullcount++;
-							}
-						}
-					} else {
-						applog(LOG_DEBUG, "Bmsc nonce duplication");
-					}
-
-					if (nonceok) {
-						count++;
-						hash_count = (nonce & info->nonce_mask);
-						hash_count++;
-						hash_count *= info->fpga_count;
-						hash_done += 0xffffffff;//hash_count;
-
-						applog(LOG_DEBUG, "%s%d: nonce = 0x%08x = 0x%08lX hashes (%ld.%06lds)",
-								bmsc->drv->name, bmsc->device_id, nonce, (long unsigned int )hash_count, elapsed.tv_sec, elapsed.tv_usec);
-					}
-					readlen = 0;
-				}
-			} else {
-				//usb_buffer_clear(bmsc);
-				applog(LOG_DEBUG, "bmsc_scanhash usb_read_once_timeout read time out");
-				break;
-			}
-		}
-	}
-
-	err = usb_write(bmsc, (char *)ob_bin, sizeof(ob_bin), &amount, C_SENDWORK);
-	if (err < 0 || amount != sizeof(ob_bin)) {
-		applog(LOG_ERR, "%s%i: Comms error (werr=%d amt=%d)", bmsc->drv->name, bmsc->device_id, err, amount);
+	err = usb_write_ii(bmsc, info->intinfo, (char *)(&workdata), sizeof(workdata), &amount, C_SENDWORK);
+	if (err < 0 || amount != sizeof(workdata)) {
+		applog(LOG_ERR, "%s%i: Comms error (werr=%d amt=%d)",
+				bmsc->drv->name, bmsc->device_id, err, amount);
 		dev_error(bmsc, REASON_DEV_COMMS_ERROR);
 		bmsc_initialise(bmsc, info->baud);
-		return 0;
+		goto out;
 	}
 
 	if (opt_debug) {
-		ob_hex = bin2hex(ob_bin, sizeof(ob_bin));
-		applog(LOG_DEBUG, "%s%d: sent %s", bmsc->drv->name, bmsc->device_id, ob_hex);
+		ob_hex = bin2hex((void *)(&workdata), sizeof(workdata));
+		applog(LOG_DEBUG, "%s%d: sent %s",
+			bmsc->drv->name, bmsc->device_id, ob_hex);
 		free(ob_hex);
 	}
 
-	cgtime(&tv_start);
-	readlen = 0;
-	while(true) {
-		if (bmsc->usbinfo.nodev)
-			return -1;
-		amount = 0;
-		memset(nonce_bin, 0, sizeof(nonce_bin));
-		err = usb_read_once_timeout(bmsc, (char *)nonce_bin+readlen, 5-readlen, &amount, BMSC_WAIT_TIMEOUT, C_GETRESULTS);
-		cgtime(&tv_finish);
-		if (err < 0 && err != LIBUSB_ERROR_TIMEOUT) {
-			applog(LOG_ERR, "%s%i: Comms error (rerr=%d amt=%d)", bmsc->drv->name, bmsc->device_id, err, amount);
-			dev_error(bmsc, REASON_DEV_COMMS_ERROR);
-			return 0;
-		}
-		if(amount > 0) {
-			readalllen += amount;
-			readlen += amount;
-			if (readlen >= 5) {
-				nonceok = false;
+	/* Bmsc will return 4 bytes (BMSC_READ_SIZE) nonces or nothing */
+	memset(nonce_bin, 0, sizeof(nonce_bin));
+	ret = bmsc_get_nonce(bmsc, nonce_bin, &tv_start, &tv_finish, thr, info->read_time);
+	if (ret == BTM_NONCE_ERROR)
+		goto out;
 
+	// aborted before becoming idle, get new work
+	if (ret == BTM_NONCE_TIMEOUT || ret == BTM_NONCE_RESTART) {
+		timersub(&tv_finish, &tv_start, &elapsed);
 
-				memcpy((char *) &nonce, nonce_bin, BMSC_READ_SIZE);
-				noncedup = false;
-				for(i = 0; i < BMSC_NONCE_ARRAY_SIZE; i++) {
-					if(memcmp(nonce_bin, info->nonce_bin[i], BMSC_READ_SIZE) == 0) {
-						noncedup = true;
-						break;
-					}
-				}
-				if(!noncedup) {
-					if(info->nonce_index < 0 || info->nonce_index >= BMSC_NONCE_ARRAY_SIZE)
-						info->nonce_index = 0;
+		// ONLY up to just when it aborted
+		// We didn't read a reply so we don't subtract BMSC_READ_TIME
+		estimate_hashes = ((double)(elapsed.tv_sec)
+					+ ((double)(elapsed.tv_usec))/((double)1000000)) / info->Hs;
 
-					memcpy(info->nonce_bin[info->nonce_index], nonce_bin, BMSC_READ_SIZE);
-					info->nonce_index++;
+		// If some Serial-USB delay allowed the full nonce range to
+		// complete it can't have done more than a full nonce
+		if (unlikely(estimate_hashes > 0xffffffff))
+			estimate_hashes = 0xffffffff;
 
-					nonce = htobe32(nonce);
-					nofull = 0;
-					if (submit_nonce_1(thr, work, nonce, &nofull)) {
-						applog(LOG_DEBUG, "Bmsc nonce(0x%08x) match current work", nonce);
-						submit_nonce_2(work);
-						nonceok = true;
+		applog(LOG_DEBUG, "%s%d: no nonce = 0x%08lX hashes (%ld.%06lds)",
+				bmsc->drv->name, bmsc->device_id,
+				(long unsigned int)estimate_hashes,
+				elapsed.tv_sec, elapsed.tv_usec);
 
-						if (opt_bmsc_rdworktest) {
-							for (k = 0; k <= 32; k++) {
-								if (m_bmsc_test_fp[k] == NULL) {
-									sprintf(testtmp, "minertest%02d.txt", k);
-									m_bmsc_test_fp[k] = fopen(testtmp, "a+");
-								}
-							}
-
-							strcpy(testbuf, "midstate ");
-							ob_hex = bin2hex(ob_bin, 32);
-							strcat(testbuf, ob_hex);
-							free(ob_hex);
-
-							strcat(testbuf, " data ");
-							ob_hex = bin2hex(ob_bin + 52, 12);
-							strcat(testbuf, ob_hex);
-							free(ob_hex);
-
-							strcat(testbuf, " nonce ");
-							ob_hex = bin2hex(nonce_bin, 4);
-							strcat(testbuf, ob_hex);
-							strcat(testbuf, "\r\n");
-							free(ob_hex);
-
-							asicnum = checkasic(32, nonce_bin[0]);
-							fwrite(testbuf, 1, strlen(testbuf), m_bmsc_test_fp[asicnum]);
-							fflush(m_bmsc_test_fp[asicnum]);
-						}
-					} else {
-						if(!nofull) {
-							if (info->work_queue != NULL) {
-								nofull = 0;
-								if (submit_nonce_1(thr, info->work_queue, nonce, &nofull)) {
-									applog(LOG_DEBUG, "Bmsc nonce(0x%08x) match old work", nonce);
-									submit_nonce_2(info->work_queue);
-									nonceok = true;
-								} else {
-									if(!nofull) {
-										applog(LOG_DEBUG, "Bmsc nonce(0x%08x) not match work", nonce);
-										usb_buffer_clear(bmsc);
-										inc_hw_errors(thr);
-										break;
-									} else {
-										nofullcount++;
-									}
-								}
-							} else {
-								applog(LOG_DEBUG, "Bmsc nonce(0x%08x) no old work", nonce);
-							}
-						} else {
-							nofullcount++;
-						}
-					}
-				} else {
-					applog(LOG_DEBUG, "Bmsc nonce duplication");
-				}
-
-				if(nonceok) {
-					count++;
-					hash_count = (nonce & info->nonce_mask);
-					hash_count++;
-					hash_count *= info->fpga_count;
-					hash_done += 0xffffffff;//hash_count;
-
-					applog(LOG_DEBUG, "%s%d: nonce = 0x%08x = 0x%08lX hashes (%ld.%06lds)",
-						bmsc->drv->name, bmsc->device_id, nonce, (long unsigned int )hash_count, elapsed.tv_sec, elapsed.tv_usec);
-				}
-				readlen = 0;
-			}
-		} else {
-			applog(LOG_DEBUG, "bmsc_scanhash usb_read_once_timeout read time out");
-		}
-
-		read_time = SECTOMS(tdiff(&tv_finish, &tv_start));
-		if(read_time >= info->read_time) {
-			if (readalllen > 0)
-				applog(LOG_DEBUG, "Bmsc Read: Nonce ok:%d below:%d in %d ms", count, nofullcount, read_time);
-			else
-				applog(LOG_DEBUG, "Bmsc Read: No nonce work %d for %d ms", work->id, read_time);
-
-			break;
-		}
+		hash_count = 0;
+		goto out;
 	}
 
-	if(info->work_queue != NULL) {
-		free_work(info->work_queue);
-		info->work_queue = NULL;
-	}
+	memcpy((char *)&nonce, nonce_bin, sizeof(nonce_bin));
+	nonce = htobe32(nonce);
+	curr_hw_errors = bmsc->hw_errors;
+	submit_nonce(thr, work, nonce);
+	was_hw_error = (curr_hw_errors > bmsc->hw_errors);
 
-	info->work_queue = copy_work(work);
+	hash_count = (nonce & info->nonce_mask);
+	hash_count++;
+	hash_count *= info->fpga_count;
 
-	work->blk.nonce = 0xffffffff;
+	hash_count = 0xffffffff;
 
-	applog(LOG_DEBUG, "bmsc_scanhash stop ------------");
+	if (opt_debug || info->do_bmsc_timing)
+		timersub(&tv_finish, &tv_start, &elapsed);
 
-	return hash_done;
+	applog(LOG_DEBUG, "%s%d: nonce = 0x%08x = 0x%08lX hashes (%ld.%06lds)",
+			bmsc->drv->name, bmsc->device_id,
+			nonce, (long unsigned int)hash_count,
+			elapsed.tv_sec, elapsed.tv_usec);
+
+out:
+	free_work(work);
+	return hash_count;
 }
 
 static struct api_data *bmsc_api_stats(struct cgpu_info *cgpu)
@@ -1423,18 +1329,82 @@ static struct api_data *bmsc_api_stats(struct cgpu_info *cgpu)
 	return root;
 }
 
+static void bmsc_statline_before(char *buf, size_t bufsiz, struct cgpu_info *cgpu)
+{
+	struct BMSC_INFO *info = (struct BMSC_INFO *)(cgpu->device_data);
+
+	if (info->ident == IDENT_CMR2 && info->cmr2_speed > 0)
+		tailsprintf(buf, bufsiz, "%5.1fMhz", (float)(info->cmr2_speed) * BMSC_CMR2_SPEED_FACTOR);
+	else
+		tailsprintf(buf, bufsiz, "       ");
+
+	tailsprintf(buf, bufsiz, "        | ");
+}
+
 static void bmsc_shutdown(__maybe_unused struct thr_info *thr)
 {
 	// TODO: ?
 }
 
+static void bmsc_identify(struct cgpu_info *cgpu)
+{
+	struct BMSC_INFO *info = (struct BMSC_INFO *)(cgpu->device_data);
+
+	if (info->ident == IDENT_CMR2)
+		info->flash_next_work = true;
+}
+
+static char *bmsc_set(struct cgpu_info *cgpu, char *option, char *setting, char *replybuf)
+{
+	struct BMSC_INFO *info = (struct BMSC_INFO *)(cgpu->device_data);
+	int val;
+
+	if (info->ident != IDENT_CMR2) {
+		strcpy(replybuf, "no set options available");
+		return replybuf;
+	}
+
+	if (strcasecmp(option, "help") == 0) {
+		sprintf(replybuf, "clock: range %d-%d",
+				  BMSC_CMR2_SPEED_MIN_INT, BMSC_CMR2_SPEED_MAX_INT);
+		return replybuf;
+	}
+
+	if (strcasecmp(option, "clock") == 0) {
+		if (!setting || !*setting) {
+			sprintf(replybuf, "missing clock setting");
+			return replybuf;
+		}
+
+		val = atoi(setting);
+		if (val < BMSC_CMR2_SPEED_MIN_INT || val > BMSC_CMR2_SPEED_MAX_INT) {
+			sprintf(replybuf, "invalid clock: '%s' valid range %d-%d",
+					  setting,
+					  BMSC_CMR2_SPEED_MIN_INT,
+					  BMSC_CMR2_SPEED_MAX_INT);
+		}
+
+		info->cmr2_speed = CMR2_INT_TO_SPEED(val);
+		info->speed_next_work = true;
+
+		return NULL;
+	}
+
+	sprintf(replybuf, "Unknown option: %s", option);
+	return replybuf;
+}
+
 struct device_drv bmsc_drv = {
-	.drv_id = DRIVER_BMSC,
-	.dname = "Bmsc",
+	.drv_id = DRIVER_bmsc,
+	.dname = "Bitmain",
 	.name = "BTM",
 	.drv_detect = bmsc_detect,
+	.hash_work = &hash_driver_work,
 	.get_api_stats = bmsc_api_stats,
+	.get_statline_before = bmsc_statline_before,
+	.set_device = bmsc_set,
+	.identify_device = bmsc_identify,
 	.thread_prepare = bmsc_prepare,
-	.scanhash = bmsc_scanhash,
+	.scanwork = bmsc_scanwork,
 	.thread_shutdown = bmsc_shutdown,
 };

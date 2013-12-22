@@ -16,7 +16,9 @@
 #include <stdarg.h>
 #include <string.h>
 #include <jansson.h>
+#ifdef HAVE_LIBCURL
 #include <curl/curl.h>
+#endif
 #include <time.h>
 #include <errno.h>
 #include <unistd.h>
@@ -45,6 +47,44 @@
 #define DEFAULT_SOCKWAIT 60
 
 bool successful_connect = false;
+static void keep_sockalive(SOCKETTYPE fd)
+{
+	const int tcp_one = 1;
+#ifndef WIN32
+	const int tcp_keepidle = 45;
+	const int tcp_keepintvl = 30;
+	int flags = fcntl(fd, F_GETFL, 0);
+
+	fcntl(fd, F_SETFL, O_NONBLOCK | flags);
+#else
+	u_long flags = 1;
+
+	ioctlsocket(fd, FIONBIO, &flags);
+#endif
+
+	setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (const void *)&tcp_one, sizeof(tcp_one));
+	if (!opt_delaynet)
+#ifndef __linux
+		setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const void *)&tcp_one, sizeof(tcp_one));
+#else /* __linux */
+		setsockopt(fd, SOL_TCP, TCP_NODELAY, (const void *)&tcp_one, sizeof(tcp_one));
+	setsockopt(fd, SOL_TCP, TCP_KEEPCNT, &tcp_one, sizeof(tcp_one));
+	setsockopt(fd, SOL_TCP, TCP_KEEPIDLE, &tcp_keepidle, sizeof(tcp_keepidle));
+	setsockopt(fd, SOL_TCP, TCP_KEEPINTVL, &tcp_keepintvl, sizeof(tcp_keepintvl));
+#endif /* __linux */
+
+#ifdef __APPLE_CC__
+	setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &tcp_keepintvl, sizeof(tcp_keepintvl));
+#endif /* __APPLE_CC__ */
+
+}
+
+struct tq_ent {
+	void			*data;
+	struct list_head	q_node;
+};
+
+#ifdef HAVE_LIBCURL
 struct timeval nettime;
 
 struct data_buffer {
@@ -65,47 +105,6 @@ struct header_info {
 	bool		hadrolltime;
 	bool		canroll;
 	bool		hadexpire;
-};
-
-struct tq_ent {
-	void			*data;
-	struct list_head	q_node;
-};
-
-unsigned char bit_swap_table[256] =
-{
-  0x00, 0x80, 0x40, 0xc0, 0x20, 0xa0, 0x60, 0xe0,
-  0x10, 0x90, 0x50, 0xd0, 0x30, 0xb0, 0x70, 0xf0,
-  0x08, 0x88, 0x48, 0xc8, 0x28, 0xa8, 0x68, 0xe8,
-  0x18, 0x98, 0x58, 0xd8, 0x38, 0xb8, 0x78, 0xf8,
-  0x04, 0x84, 0x44, 0xc4, 0x24, 0xa4, 0x64, 0xe4,
-  0x14, 0x94, 0x54, 0xd4, 0x34, 0xb4, 0x74, 0xf4,
-  0x0c, 0x8c, 0x4c, 0xcc, 0x2c, 0xac, 0x6c, 0xec,
-  0x1c, 0x9c, 0x5c, 0xdc, 0x3c, 0xbc, 0x7c, 0xfc,
-  0x02, 0x82, 0x42, 0xc2, 0x22, 0xa2, 0x62, 0xe2,
-  0x12, 0x92, 0x52, 0xd2, 0x32, 0xb2, 0x72, 0xf2,
-  0x0a, 0x8a, 0x4a, 0xca, 0x2a, 0xaa, 0x6a, 0xea,
-  0x1a, 0x9a, 0x5a, 0xda, 0x3a, 0xba, 0x7a, 0xfa,
-  0x06, 0x86, 0x46, 0xc6, 0x26, 0xa6, 0x66, 0xe6,
-  0x16, 0x96, 0x56, 0xd6, 0x36, 0xb6, 0x76, 0xf6,
-  0x0e, 0x8e, 0x4e, 0xce, 0x2e, 0xae, 0x6e, 0xee,
-  0x1e, 0x9e, 0x5e, 0xde, 0x3e, 0xbe, 0x7e, 0xfe,
-  0x01, 0x81, 0x41, 0xc1, 0x21, 0xa1, 0x61, 0xe1,
-  0x11, 0x91, 0x51, 0xd1, 0x31, 0xb1, 0x71, 0xf1,
-  0x09, 0x89, 0x49, 0xc9, 0x29, 0xa9, 0x69, 0xe9,
-  0x19, 0x99, 0x59, 0xd9, 0x39, 0xb9, 0x79, 0xf9,
-  0x05, 0x85, 0x45, 0xc5, 0x25, 0xa5, 0x65, 0xe5,
-  0x15, 0x95, 0x55, 0xd5, 0x35, 0xb5, 0x75, 0xf5,
-  0x0d, 0x8d, 0x4d, 0xcd, 0x2d, 0xad, 0x6d, 0xed,
-  0x1d, 0x9d, 0x5d, 0xdd, 0x3d, 0xbd, 0x7d, 0xfd,
-  0x03, 0x83, 0x43, 0xc3, 0x23, 0xa3, 0x63, 0xe3,
-  0x13, 0x93, 0x53, 0xd3, 0x33, 0xb3, 0x73, 0xf3,
-  0x0b, 0x8b, 0x4b, 0xcb, 0x2b, 0xab, 0x6b, 0xeb,
-  0x1b, 0x9b, 0x5b, 0xdb, 0x3b, 0xbb, 0x7b, 0xfb,
-  0x07, 0x87, 0x47, 0xc7, 0x27, 0xa7, 0x67, 0xe7,
-  0x17, 0x97, 0x57, 0xd7, 0x37, 0xb7, 0x77, 0xf7,
-  0x0f, 0x8f, 0x4f, 0xcf, 0x2f, 0xaf, 0x6f, 0xef,
-  0x1f, 0x9f, 0x5f, 0xdf, 0x3f, 0xbf, 0x7f, 0xff,
 };
 
 static void databuf_free(struct data_buffer *db)
@@ -238,36 +237,19 @@ out:
 	return ptrlen;
 }
 
-static void keep_sockalive(SOCKETTYPE fd)
+static void last_nettime(struct timeval *last)
 {
-	const int tcp_one = 1;
-#ifndef WIN32
-	const int tcp_keepidle = 45;
-	const int tcp_keepintvl = 30;
-	int flags = fcntl(fd, F_GETFL, 0);
+	rd_lock(&netacc_lock);
+	last->tv_sec = nettime.tv_sec;
+	last->tv_usec = nettime.tv_usec;
+	rd_unlock(&netacc_lock);
+}
 
-	fcntl(fd, F_SETFL, O_NONBLOCK | flags);
-#else
-	u_long flags = 1;
-
-	ioctlsocket(fd, FIONBIO, &flags);
-#endif
-
-	setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (const void *)&tcp_one, sizeof(tcp_one));
-	if (!opt_delaynet)
-#ifndef __linux
-		setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const void *)&tcp_one, sizeof(tcp_one));
-#else /* __linux */
-		setsockopt(fd, SOL_TCP, TCP_NODELAY, (const void *)&tcp_one, sizeof(tcp_one));
-	setsockopt(fd, SOL_TCP, TCP_KEEPCNT, &tcp_one, sizeof(tcp_one));
-	setsockopt(fd, SOL_TCP, TCP_KEEPIDLE, &tcp_keepidle, sizeof(tcp_keepidle));
-	setsockopt(fd, SOL_TCP, TCP_KEEPINTVL, &tcp_keepintvl, sizeof(tcp_keepintvl));
-#endif /* __linux */
-
-#ifdef __APPLE_CC__
-	setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &tcp_keepintvl, sizeof(tcp_keepintvl));
-#endif /* __APPLE_CC__ */
-
+static void set_nettime(void)
+{
+	wr_lock(&netacc_lock);
+	cgtime(&nettime);
+	wr_unlock(&netacc_lock);
 }
 
 #if CURL_HAS_KEEPALIVE
@@ -290,21 +272,6 @@ static void keep_curlalive(CURL *curl)
 	keep_sockalive(sock);
 }
 #endif
-
-static void last_nettime(struct timeval *last)
-{
-	rd_lock(&netacc_lock);
-	last->tv_sec = nettime.tv_sec;
-	last->tv_usec = nettime.tv_usec;
-	rd_unlock(&netacc_lock);
-}
-
-static void set_nettime(void)
-{
-	wr_lock(&netacc_lock);
-	cgtime(&nettime);
-	wr_unlock(&netacc_lock);
-}
 
 static int curl_debug_cb(__maybe_unused CURL *handle, curl_infotype type,
 			 __maybe_unused char *data, size_t size, void *userdata)
@@ -549,29 +516,35 @@ err_out:
 	curl_easy_setopt(curl, CURLOPT_FRESH_CONNECT, 1);
 	return NULL;
 }
+#define PROXY_HTTP	CURLPROXY_HTTP
+#define PROXY_HTTP_1_0	CURLPROXY_HTTP_1_0
+#define PROXY_SOCKS4	CURLPROXY_SOCKS4
+#define PROXY_SOCKS5	CURLPROXY_SOCKS5
+#define PROXY_SOCKS4A	CURLPROXY_SOCKS4A
+#define PROXY_SOCKS5H	CURLPROXY_SOCKS5_HOSTNAME
+#else /* HAVE_LIBCURL */
+#define PROXY_HTTP	0
+#define PROXY_HTTP_1_0	1
+#define PROXY_SOCKS4	2
+#define PROXY_SOCKS5	3
+#define PROXY_SOCKS4A	4
+#define PROXY_SOCKS5H	5
+#endif /* HAVE_LIBCURL */
 
-#if (LIBCURL_VERSION_MAJOR == 7 && LIBCURL_VERSION_MINOR >= 10) || (LIBCURL_VERSION_MAJOR > 7)
 static struct {
 	const char *name;
-	curl_proxytype proxytype;
+	proxytypes_t proxytype;
 } proxynames[] = {
-	{ "http:",	CURLPROXY_HTTP },
-#if (LIBCURL_VERSION_MAJOR > 7) || (LIBCURL_VERSION_MINOR > 19) || (LIBCURL_VERSION_MINOR == 19 && LIBCURL_VERSION_PATCH >= 4)
-	{ "http0:",	CURLPROXY_HTTP_1_0 },
-#endif
-#if (LIBCURL_VERSION_MAJOR > 7) || (LIBCURL_VERSION_MINOR > 15) || (LIBCURL_VERSION_MINOR == 15 && LIBCURL_VERSION_PATCH >= 2)
-	{ "socks4:",	CURLPROXY_SOCKS4 },
-#endif
-	{ "socks5:",	CURLPROXY_SOCKS5 },
-#if (LIBCURL_VERSION_MAJOR > 7) || (LIBCURL_VERSION_MINOR >= 18)
-	{ "socks4a:",	CURLPROXY_SOCKS4A },
-	{ "socks5h:",	CURLPROXY_SOCKS5_HOSTNAME },
-#endif
+	{ "http:",	PROXY_HTTP },
+	{ "http0:",	PROXY_HTTP_1_0 },
+	{ "socks4:",	PROXY_SOCKS4 },
+	{ "socks5:",	PROXY_SOCKS5 },
+	{ "socks4a:",	PROXY_SOCKS4A },
+	{ "socks5h:",	PROXY_SOCKS5H },
 	{ NULL,	0 }
 };
-#endif
 
-const char *proxytype(curl_proxytype proxytype)
+const char *proxytype(proxytypes_t proxytype)
 {
 	int i;
 
@@ -586,7 +559,6 @@ char *get_proxy(char *url, struct pool *pool)
 {
 	pool->rpc_proxy = NULL;
 
-#if (LIBCURL_VERSION_MAJOR == 7 && LIBCURL_VERSION_MINOR >= 10) || (LIBCURL_VERSION_MAJOR > 7)
 	char *split;
 	int plen, len, i;
 
@@ -609,8 +581,20 @@ char *get_proxy(char *url, struct pool *pool)
 			break;
 		}
 	}
-#endif
 	return url;
+}
+
+/* Adequate size s==len*2 + 1 must be alloced to use this variant */
+void __bin2hex(char *s, const unsigned char *p, size_t len)
+{
+	int i;
+	static const char hex[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
+
+	for (i = 0; i < (int)len; i++) {
+		*s++ = hex[p[i] >> 4];
+		*s++ = hex[p[i] & 0xF];
+	}
+	*s++ = '\0';
 }
 
 /* Returns a malloced array string of a binary value of arbitrary length. The
@@ -620,7 +604,6 @@ char *bin2hex(const unsigned char *p, size_t len)
 {
 	ssize_t slen;
 	char *s;
-	int i;
 
 	slen = len * 2 + 1;
 	if (slen % 4)
@@ -629,40 +612,54 @@ char *bin2hex(const unsigned char *p, size_t len)
 	if (unlikely(!s))
 		quithere(1, "Failed to calloc");
 
-	for (i = 0; i < (int)len; i++)
-		sprintf(s + (i * 2), "%02x", (unsigned int)p[i]);
+	__bin2hex(s, p, len);
 
 	return s;
 }
 
 /* Does the reverse of bin2hex but does not allocate any ram */
+static const int hex2bin_tbl[256] = {
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, -1, -1, -1, -1, -1, -1,
+	-1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+};
 bool hex2bin(unsigned char *p, const char *hexstr, size_t len)
 {
+	int nibble1, nibble2;
+	unsigned char idx;
 	bool ret = false;
 
 	while (*hexstr && len) {
-		char hex_byte[4];
-		unsigned int v;
-
 		if (unlikely(!hexstr[1])) {
 			applog(LOG_ERR, "hex2bin str truncated");
 			return ret;
 		}
 
-		memset(hex_byte, 0, 4);
-		hex_byte[0] = hexstr[0];
-		hex_byte[1] = hexstr[1];
+		idx = *hexstr++;
+		nibble1 = hex2bin_tbl[idx];
+		idx = *hexstr++;
+		nibble2 = hex2bin_tbl[idx];
 
-		if (unlikely(sscanf(hex_byte, "%x", &v) != 1)) {
-			applog(LOG_INFO, "hex2bin sscanf '%s' failed", hex_byte);
+		if (unlikely((nibble1 < 0) || (nibble2 < 0))) {
+			applog(LOG_ERR, "hex2bin scan failed");
 			return ret;
 		}
 
-		*p = (unsigned char) v;
-
-		p++;
-		hexstr += 2;
-		len--;
+		*p++ = (((unsigned char)nibble1) << 4) | ((unsigned char)nibble2);
+		--len;
 	}
 
 	if (likely(len == 0 && *hexstr == 0))
@@ -672,21 +669,14 @@ bool hex2bin(unsigned char *p, const char *hexstr, size_t len)
 
 bool fulltest(const unsigned char *hash, const unsigned char *target)
 {
-	unsigned char hash_swap[32], target_swap[32];
-	uint32_t *hash32 = (uint32_t *) hash_swap;
-	uint32_t *target32 = (uint32_t *) target_swap;
-	char *hash_str, *target_str;
+	uint32_t *hash32 = (uint32_t *)hash;
+	uint32_t *target32 = (uint32_t *)target;
 	bool rc = true;
 	int i;
 
-	swap256(hash_swap, hash);
-	swap256(target_swap, target);
-
-	for (i = 0; i < 32/4; i++) {
-		uint32_t h32tmp = htobe32(hash32[i]);
-		uint32_t t32tmp = htole32(target32[i]);
-
-		target32[i] = swab32(target32[i]);	/* for printing */
+	for (i = 28 / 4; i >= 0; i--) {
+		uint32_t h32tmp = le32toh(hash32[i]);
+		uint32_t t32tmp = le32toh(target32[i]);
 
 		if (h32tmp > t32tmp) {
 			rc = false;
@@ -699,6 +689,11 @@ bool fulltest(const unsigned char *hash, const unsigned char *target)
 	}
 
 	if (opt_debug) {
+		unsigned char hash_swap[32], target_swap[32];
+		char *hash_str, *target_str;
+
+		swab256(hash_swap, hash);
+		swab256(target_swap, target);
 		hash_str = bin2hex(hash_swap, 32);
 		target_str = bin2hex(target_swap, 32);
 
@@ -902,6 +897,14 @@ void ms_to_timespec(struct timespec *spec, int64_t ms)
 	spec->tv_nsec = tvdiv.rem * 1000000;
 }
 
+void ms_to_timeval(struct timeval *val, int64_t ms)
+{
+	lldiv_t tvdiv = lldiv(ms, 1000);
+
+	val->tv_sec = tvdiv.quot;
+	val->tv_usec = tvdiv.rem * 1000;
+}
+
 void timeraddspec(struct timespec *a, const struct timespec *b)
 {
 	a->tv_sec += b->tv_sec;
@@ -912,20 +915,9 @@ void timeraddspec(struct timespec *a, const struct timespec *b)
 	}
 }
 
-static int timespec_to_ms(struct timespec *ts)
+static int __maybe_unused timespec_to_ms(struct timespec *ts)
 {
 	return ts->tv_sec * 1000 + ts->tv_nsec / 1000000;
-}
-
-/* Subtracts b from a and stores it in res. */
-void cgtimer_sub(cgtimer_t *a, cgtimer_t *b, cgtimer_t *res)
-{
-	res->tv_sec = a->tv_sec - b->tv_sec;
-	res->tv_nsec = a->tv_nsec - b->tv_nsec;
-	if (res->tv_nsec < 0) {
-		res->tv_nsec += 1000000000;
-		res->tv_sec--;
-	}
 }
 
 /* Subtract b from a */
@@ -937,23 +929,6 @@ static void __maybe_unused timersubspec(struct timespec *a, const struct timespe
 		a->tv_nsec += 1000000000;
 		a->tv_sec--;
 	}
-}
-
-static void __maybe_unused cgsleep_spec(struct timespec *ts_diff, const struct timespec *ts_start)
-{
-	struct timespec now;
-
-	timeraddspec(ts_diff, ts_start);
-	cgtimer_time(&now);
-	timersubspec(ts_diff, &now);
-	if (unlikely(ts_diff->tv_sec < 0))
-		return;
-	nanosleep(ts_diff, NULL);
-}
-
-int cgtimer_to_ms(cgtimer_t *cgt)
-{
-	return timespec_to_ms(cgt);
 }
 
 /* These are cgminer specific sleep functions that use an absolute nanosecond
@@ -989,18 +964,26 @@ void cgtime(struct timeval *tv)
 	tv->tv_usec = lidiv.rem / 10;
 }
 
-void cgtimer_time(cgtimer_t *ts_start)
-{
-	lldiv_t lidiv;;
-
-	decius_time(&lidiv);
-	ts_start->tv_sec = lidiv.quot;
-	ts_start->tv_nsec = lidiv.quot * 100;
-}
 #else /* WIN32 */
 void cgtime(struct timeval *tv)
 {
 	gettimeofday(tv, NULL);
+}
+
+int cgtimer_to_ms(cgtimer_t *cgt)
+{
+	return timespec_to_ms(cgt);
+}
+
+/* Subtracts b from a and stores it in res. */
+void cgtimer_sub(cgtimer_t *a, cgtimer_t *b, cgtimer_t *res)
+{
+	res->tv_sec = a->tv_sec - b->tv_sec;
+	res->tv_nsec = a->tv_nsec - b->tv_nsec;
+	if (res->tv_nsec < 0) {
+		res->tv_nsec += 1000000000;
+		res->tv_sec--;
+	}
 }
 #endif /* WIN32 */
 
@@ -1064,6 +1047,88 @@ void cgtimer_time(cgtimer_t *ts_start)
 	ts_start->tv_nsec = tv->tv_usec * 1000;
 }
 #endif /* __MACH__ */
+
+#ifdef WIN32
+/* For windows we use the SystemTime stored as a LARGE_INTEGER as the cgtimer_t
+ * typedef, allowing us to have sub-microsecond resolution for times, do simple
+ * arithmetic for timer calculations, and use windows' own hTimers to get
+ * accurate absolute timeouts. */
+int cgtimer_to_ms(cgtimer_t *cgt)
+{
+	return (int)(cgt->QuadPart / 10000LL);
+}
+
+/* Subtracts b from a and stores it in res. */
+void cgtimer_sub(cgtimer_t *a, cgtimer_t *b, cgtimer_t *res)
+{
+	res->QuadPart = a->QuadPart - b->QuadPart;
+}
+
+/* Note that cgtimer time is NOT offset by the unix epoch since we use absolute
+ * timeouts with hTimers. */
+void cgtimer_time(cgtimer_t *ts_start)
+{
+	FILETIME ft;
+
+	GetSystemTimeAsFileTime(&ft);
+	ts_start->LowPart = ft.dwLowDateTime;
+	ts_start->HighPart = ft.dwHighDateTime;
+}
+
+static void liSleep(LARGE_INTEGER *li, int timeout)
+{
+	HANDLE hTimer;
+	DWORD ret;
+
+	if (unlikely(timeout <= 0))
+		return;
+
+	hTimer = CreateWaitableTimer(NULL, TRUE, NULL);
+	if (unlikely(!hTimer))
+		quit(1, "Failed to create hTimer in liSleep");
+	ret = SetWaitableTimer(hTimer, li, 0, NULL, NULL, 0);
+	if (unlikely(!ret))
+		quit(1, "Failed to SetWaitableTimer in liSleep");
+	/* We still use a timeout as a sanity check in case the system time
+	 * is changed while we're running */
+	ret = WaitForSingleObject(hTimer, timeout);
+	if (unlikely(ret != WAIT_OBJECT_0 && ret != WAIT_TIMEOUT))
+		quit(1, "Failed to WaitForSingleObject in liSleep");
+	CloseHandle(hTimer);
+}
+
+void cgsleep_ms_r(cgtimer_t *ts_start, int ms)
+{
+	LARGE_INTEGER li;
+
+	li.QuadPart = ts_start->QuadPart + (int64_t)ms * 10000LL;
+	liSleep(&li, ms);
+}
+
+void cgsleep_us_r(cgtimer_t *ts_start, int64_t us)
+{
+	LARGE_INTEGER li;
+	int ms;
+
+	li.QuadPart = ts_start->QuadPart + us * 10LL;
+	ms = us / 1000;
+	if (!ms)
+		ms = 1;
+	liSleep(&li, ms);
+}
+#else /* WIN32 */
+static void cgsleep_spec(struct timespec *ts_diff, const struct timespec *ts_start)
+{
+	struct timespec now;
+
+	timeraddspec(ts_diff, ts_start);
+	cgtimer_time(&now);
+	timersubspec(ts_diff, &now);
+	if (unlikely(ts_diff->tv_sec < 0))
+		return;
+	nanosleep(ts_diff, NULL);
+}
+
 void cgsleep_ms_r(cgtimer_t *ts_start, int ms)
 {
 	struct timespec ts_diff;
@@ -1079,6 +1144,7 @@ void cgsleep_us_r(cgtimer_t *ts_start, int64_t us)
 	us_to_timespec(&ts_diff, us);
 	cgsleep_spec(&ts_diff, ts_start);
 }
+#endif /* WIN32 */
 #endif /* CLOCK_MONOTONIC */
 
 void cgsleep_ms(int ms)
@@ -1100,7 +1166,20 @@ void cgsleep_us(int64_t us)
 /* Returns the microseconds difference between end and start times as a double */
 double us_tdiff(struct timeval *end, struct timeval *start)
 {
-	return end->tv_sec * 1000000 + end->tv_usec - start->tv_sec * 1000000 - start->tv_usec;
+	/* Sanity check. We should only be using this for small differences so
+	 * limit the max to 60 seconds. */
+	if (unlikely(end->tv_sec - start->tv_sec > 60))
+		return 60000000;
+	return (end->tv_sec - start->tv_sec) * 1000000 + (end->tv_usec - start->tv_usec);
+}
+
+/* Returns the milliseconds difference between end and start times */
+int ms_tdiff(struct timeval *end, struct timeval *start)
+{
+	/* Like us_tdiff, limit to 1 hour. */
+	if (unlikely(end->tv_sec - start->tv_sec > 3600))
+		return 3600000;
+	return (end->tv_sec - start->tv_sec) * 1000 + (end->tv_usec - start->tv_usec) / 1000;
 }
 
 /* Returns the seconds difference between end and start times as a double */
@@ -1551,6 +1630,8 @@ static bool parse_notify(struct pool *pool, json_t *val)
 	pool->getwork_requested++;
 	total_getworks++;
 	ret = true;
+	if (pool == current_pool())
+		opt_work_update = true;
 out:
 	return ret;
 }
@@ -1657,8 +1738,10 @@ bool parse_method(struct pool *pool, char *s)
 	}
 
 	method = json_object_get(val, "method");
-	if (!method)
+	if (!method) {
+		json_decref(val);
 		return ret;
+	}
 	err_val = json_object_get(val, "error");
 	params = json_object_get(val, "params");
 
@@ -1672,42 +1755,51 @@ bool parse_method(struct pool *pool, char *s)
 
 		applog(LOG_INFO, "JSON-RPC method decode failed: %s", ss);
 
+		json_decref(val);
 		free(ss);
 
 		return ret;
 	}
 
 	buf = (char *)json_string_value(method);
-	if (!buf)
+	if (!buf) {
+		json_decref(val);
 		return ret;
+	}
 
 	if (!strncasecmp(buf, "mining.notify", 13)) {
 		if (parse_notify(pool, params))
 			pool->stratum_notify = ret = true;
 		else
 			pool->stratum_notify = ret = false;
+		json_decref(val);
 		return ret;
 	}
 
 	if (!strncasecmp(buf, "mining.set_difficulty", 21) && parse_diff(pool, params)) {
 		ret = true;
+		json_decref(val);
 		return ret;
 	}
 
 	if (!strncasecmp(buf, "client.reconnect", 16) && parse_reconnect(pool, params)) {
 		ret = true;
+		json_decref(val);
 		return ret;
 	}
 
 	if (!strncasecmp(buf, "client.get_version", 18) && send_version(pool, val)) {
 		ret = true;
+		json_decref(val);
 		return ret;
 	}
 
 	if (!strncasecmp(buf, "client.show_message", 19) && show_message(pool, params)) {
 		ret = true;
+		json_decref(val);
 		return ret;
 	}
+	json_decref(val);
 	return ret;
 }
 
@@ -1747,16 +1839,19 @@ bool auth_stratum(struct pool *pool)
 			ss = json_dumps(err_val, JSON_INDENT(3));
 		else
 			ss = strdup("(unknown reason)");
-		applog(LOG_WARNING, "pool %d JSON stratum auth failed: %s", pool->pool_no, ss);
+		applog(LOG_INFO, "pool %d JSON stratum auth failed: %s", pool->pool_no, ss);
 		free(ss);
 
-		return ret;
+		goto out;
 	}
 
 	ret = true;
 	applog(LOG_INFO, "Stratum authorisation success for pool %d", pool->pool_no);
 	pool->probed = true;
 	successful_connect = true;
+
+out:
+	json_decref(val);
 	return ret;
 }
 
@@ -1804,7 +1899,7 @@ static bool http_negotiate(struct pool *pool, int sockd, bool http0)
 	/* Ignore unwanted headers till we get desired response */
 	for (i = 0; i < 4; i++) {
 		buf[i] = recv_byte(sockd);
-		if (buf[i] == -1) {
+		if (buf[i] == (char)-1) {
 			applog(LOG_WARNING, "Couldn't read HTTP byte from proxy %s:%s",
 			pool->sockaddr_proxy_url, pool->sockaddr_proxy_port);
 			return false;
@@ -1814,7 +1909,7 @@ static bool http_negotiate(struct pool *pool, int sockd, bool http0)
 		for (i = 0; i < 3; i++)
 			buf[i] = buf[i + 1];
 		buf[3] = recv_byte(sockd);
-		if (buf[3] == -1) {
+		if (buf[3] == (char)-1) {
 			applog(LOG_WARNING, "Couldn't read HTTP byte from proxy %s:%s",
 			pool->sockaddr_proxy_url, pool->sockaddr_proxy_port);
 			return false;
@@ -1962,6 +2057,40 @@ static bool socks4_negotiate(struct pool *pool, int sockd, bool socks4a)
 	return true;
 }
 
+static void noblock_socket(SOCKETTYPE fd)
+{
+#ifndef WIN32
+	int flags = fcntl(fd, F_GETFL, 0);
+
+	fcntl(fd, F_SETFL, O_NONBLOCK | flags);
+#else
+	u_long flags = 1;
+
+	ioctlsocket(fd, FIONBIO, &flags);
+#endif
+}
+
+static void block_socket(SOCKETTYPE fd)
+{
+#ifndef WIN32
+	int flags = fcntl(fd, F_GETFL, 0);
+
+	fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
+#else
+	u_long flags = 0;
+
+	ioctlsocket(fd, FIONBIO, &flags);
+#endif
+}
+
+static bool sock_connecting(void)
+{
+#ifndef WIN32
+	return errno == EINPROGRESS;
+#else
+	return WSAGetLastError() == WSAEWOULDBLOCK;
+#endif
+}
 static bool setup_stratum_socket(struct pool *pool)
 {
 	struct addrinfo servinfobase, *servinfo, *hints, *p;
@@ -1984,7 +2113,7 @@ static bool setup_stratum_socket(struct pool *pool)
 	if (!pool->rpc_proxy && opt_socks_proxy) {
 		pool->rpc_proxy = opt_socks_proxy;
 		extract_sockaddr(pool->rpc_proxy, &pool->sockaddr_proxy_url, &pool->sockaddr_proxy_port);
-		pool->rpc_proxytype = CURLPROXY_SOCKS5;
+		pool->rpc_proxytype = PROXY_SOCKS5;
 	}
 
 	if (pool->rpc_proxy) {
@@ -2013,16 +2142,46 @@ static bool setup_stratum_socket(struct pool *pool)
 			continue;
 		}
 
+		/* Iterate non blocking over entries returned by getaddrinfo
+		 * to cope with round robin DNS entries, finding the first one
+		 * we can connect to quickly. */
+		noblock_socket(sockd);
 		if (connect(sockd, p->ai_addr, p->ai_addrlen) == -1) {
+			struct timeval tv_timeout = {1, 0};
+			int selret;
+			fd_set rw;
+
+			if (!sock_connecting()) {
+				CLOSESOCKET(sockd);
+				applog(LOG_DEBUG, "Failed sock connect");
+				continue;
+			}
+			FD_ZERO(&rw);
+			FD_SET(sockd, &rw);
+			selret = select(sockd + 1, NULL, &rw, NULL, &tv_timeout);
+			if  (selret > 0 && FD_ISSET(sockd, &rw)) {
+				socklen_t len;
+				int err, n;
+
+				len = sizeof(err);
+				n = getsockopt(sockd, SOL_SOCKET, SO_ERROR, (void *)&err, &len);
+				if (!n && !err) {
+					applog(LOG_DEBUG, "Succeeded delayed connect");
+					block_socket(sockd);
+					break;
+				}
+			}
 			CLOSESOCKET(sockd);
-			applog(LOG_DEBUG, "Failed connect");
+			applog(LOG_DEBUG, "Select timeout/failed connect");
 			continue;
 		}
+		applog(LOG_WARNING, "Succeeded immediate connect");
+		block_socket(sockd);
 
 		break;
 	}
 	if (p == NULL) {
-		applog(LOG_NOTICE, "Failed to connect to stratum on %s:%s",
+		applog(LOG_INFO, "Failed to connect to stratum on %s:%s",
 		       sockaddr_url, sockaddr_port);
 		freeaddrinfo(servinfo);
 		return false;
@@ -2031,24 +2190,24 @@ static bool setup_stratum_socket(struct pool *pool)
 
 	if (pool->rpc_proxy) {
 		switch (pool->rpc_proxytype) {
-			case CURLPROXY_HTTP_1_0:
+			case PROXY_HTTP_1_0:
 				if (!http_negotiate(pool, sockd, true))
 					return false;
 				break;
-			case CURLPROXY_HTTP:
+			case PROXY_HTTP:
 				if (!http_negotiate(pool, sockd, false))
 					return false;
 				break;
-			case CURLPROXY_SOCKS5:
-			case CURLPROXY_SOCKS5_HOSTNAME:
+			case PROXY_SOCKS5:
+			case PROXY_SOCKS5H:
 				if (!socks5_negotiate(pool, sockd))
 					return false;
 				break;
-			case CURLPROXY_SOCKS4:
+			case PROXY_SOCKS4:
 				if (!socks4_negotiate(pool, sockd, false))
 					return false;
 				break;
-			case CURLPROXY_SOCKS4A:
+			case PROXY_SOCKS4A:
 				if (!socks4_negotiate(pool, sockd, true))
 					return false;
 				break;
@@ -2238,6 +2397,7 @@ out:
 
 			applog(LOG_DEBUG, "Failed to resume stratum, trying afresh");
 			noresume = true;
+			json_decref(val);
 			goto resend;
 		}
 		applog(LOG_DEBUG, "Initiate stratum failed");
@@ -2245,6 +2405,7 @@ out:
 			suspend_stratum(pool);
 	}
 
+	json_decref(val);
 	return ret;
 }
 
@@ -2410,10 +2571,54 @@ void _cgsem_wait(cgsem_t *cgsem, const char *file, const char *func, const int l
 		applog(LOG_WARNING, "Failed to read errno=%d" IN_FMT_FFL, errno, file, func, line);
 }
 
-void _cgsem_destroy(cgsem_t *cgsem)
+void cgsem_destroy(cgsem_t *cgsem)
 {
 	close(cgsem->pipefd[1]);
 	close(cgsem->pipefd[0]);
+}
+
+/* This is similar to sem_timedwait but takes a millisecond value */
+int _cgsem_mswait(cgsem_t *cgsem, int ms, const char *file, const char *func, const int line)
+{
+	struct timeval timeout;
+	int ret, fd;
+	fd_set rd;
+	char buf;
+
+	fd = cgsem->pipefd[0];
+	FD_ZERO(&rd);
+	FD_SET(fd, &rd);
+	ms_to_timeval(&timeout, ms);
+	ret = select(fd + 1, &rd, NULL, NULL, &timeout);
+
+	if (ret > 0) {
+		ret = read(fd, &buf, 1);
+		return 0;
+	}
+	if (likely(!ret))
+		return ETIMEDOUT;
+	quitfrom(1, file, func, line, "Failed to sem_timedwait errno=%d cgsem=0x%p", errno, cgsem);
+	/* We don't reach here */
+	return 0;
+}
+
+/* Reset semaphore count back to zero */
+void cgsem_reset(cgsem_t *cgsem)
+{
+	int ret, fd;
+	fd_set rd;
+	char buf;
+
+	fd = cgsem->pipefd[0];
+	FD_ZERO(&rd);
+	FD_SET(fd, &rd);
+	do {
+		struct timeval timeout = {0, 0};
+
+		ret = select(fd + 1, &rd, NULL, NULL, &timeout);
+		if (ret > 0)
+			ret = read(fd, &buf, 1);
+	} while (ret > 0);
 }
 #else
 void _cgsem_init(cgsem_t *cgsem, const char *file, const char *func, const int line)
@@ -2435,8 +2640,81 @@ void _cgsem_wait(cgsem_t *cgsem, const char *file, const char *func, const int l
 		quitfrom(1, file, func, line, "Failed to sem_wait errno=%d cgsem=0x%p", errno, cgsem);
 }
 
-void _cgsem_destroy(cgsem_t *cgsem)
+int _cgsem_mswait(cgsem_t *cgsem, int ms, const char *file, const char *func, const int line)
+{
+	struct timespec abs_timeout, ts_now;
+	struct timeval tv_now;
+	int ret;
+
+	cgtime(&tv_now);
+	timeval_to_spec(&ts_now, &tv_now);
+	ms_to_timespec(&abs_timeout, ms);
+	timeraddspec(&abs_timeout, &ts_now);
+	ret = sem_timedwait(cgsem, &abs_timeout);
+
+	if (ret) {
+		if (likely(sock_timeout()))
+			return ETIMEDOUT;
+		quitfrom(1, file, func, line, "Failed to sem_timedwait errno=%d cgsem=0x%p", errno, cgsem);
+	}
+	return 0;
+}
+
+void cgsem_reset(cgsem_t *cgsem)
+{
+	int ret;
+
+	do {
+		ret = sem_trywait(cgsem);
+	} while (!ret);
+}
+
+void cgsem_destroy(cgsem_t *cgsem)
 {
 	sem_destroy(cgsem);
 }
 #endif
+
+/* Provide a completion_timeout helper function for unreliable functions that
+ * may die due to driver issues etc that time out if the function fails and
+ * can then reliably return. */
+struct cg_completion {
+	cgsem_t cgsem;
+	void (*fn)(void *fnarg);
+	void *fnarg;
+};
+
+void *completion_thread(void *arg)
+{
+	struct cg_completion *cgc = (struct cg_completion *)arg;
+
+	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+	cgc->fn(cgc->fnarg);
+	cgsem_post(&cgc->cgsem);
+
+	return NULL;
+}
+
+bool cg_completion_timeout(void *fn, void *fnarg, int timeout)
+{
+	struct cg_completion *cgc;
+	pthread_t pthread;
+	bool ret = false;
+
+	cgc = malloc(sizeof(struct cg_completion));
+	if (unlikely(!cgc))
+		return ret;
+	cgsem_init(&cgc->cgsem);
+	cgc->fn = fn;
+	cgc->fnarg = fnarg;
+
+	pthread_create(&pthread, NULL, completion_thread, (void *)cgc);
+
+	ret = cgsem_mswait(&cgc->cgsem, timeout);
+	if (!ret) {
+		pthread_join(pthread, NULL);
+		free(cgc);
+	} else
+		pthread_cancel(pthread);
+	return !ret;
+}

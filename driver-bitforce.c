@@ -77,11 +77,9 @@
 
 static const char *blank = "";
 
-struct device_drv bitforce_drv;
-
 static void bitforce_initialise(struct cgpu_info *bitforce, bool lock)
 {
-	int err;
+	int err, interface;
 
 	if (lock)
 		mutex_lock(&bitforce->device_mutex);
@@ -89,9 +87,10 @@ static void bitforce_initialise(struct cgpu_info *bitforce, bool lock)
 	if (bitforce->usbinfo.nodev)
 		goto failed;
 
+	interface = usb_interface(bitforce);
 	// Reset
 	err = usb_transfer(bitforce, FTDI_TYPE_OUT, FTDI_REQUEST_RESET,
-				FTDI_VALUE_RESET, bitforce->usbdev->found->interface, C_RESET);
+				FTDI_VALUE_RESET, interface, C_RESET);
 	if (opt_debug)
 		applog(LOG_DEBUG, "%s%i: reset got err %d",
 			bitforce->drv->name, bitforce->device_id, err);
@@ -101,7 +100,7 @@ static void bitforce_initialise(struct cgpu_info *bitforce, bool lock)
 
 	// Set data control
 	err = usb_transfer(bitforce, FTDI_TYPE_OUT, FTDI_REQUEST_DATA,
-				FTDI_VALUE_DATA_BFL, bitforce->usbdev->found->interface, C_SETDATA);
+				FTDI_VALUE_DATA_BFL, interface, C_SETDATA);
 	if (opt_debug)
 		applog(LOG_DEBUG, "%s%i: setdata got err %d",
 			bitforce->drv->name, bitforce->device_id, err);
@@ -111,7 +110,7 @@ static void bitforce_initialise(struct cgpu_info *bitforce, bool lock)
 
 	// Set the baud
 	err = usb_transfer(bitforce, FTDI_TYPE_OUT, FTDI_REQUEST_BAUD, FTDI_VALUE_BAUD_BFL,
-				(FTDI_INDEX_BAUD_BFL & 0xff00) | bitforce->usbdev->found->interface,
+				(FTDI_INDEX_BAUD_BFL & 0xff00) | interface,
 				C_SETBAUD);
 	if (opt_debug)
 		applog(LOG_DEBUG, "%s%i: setbaud got err %d",
@@ -122,7 +121,7 @@ static void bitforce_initialise(struct cgpu_info *bitforce, bool lock)
 
 	// Set Flow Control
 	err = usb_transfer(bitforce, FTDI_TYPE_OUT, FTDI_REQUEST_FLOW,
-				FTDI_VALUE_FLOW, bitforce->usbdev->found->interface, C_SETFLOW);
+				FTDI_VALUE_FLOW, interface, C_SETFLOW);
 	if (opt_debug)
 		applog(LOG_DEBUG, "%s%i: setflowctrl got err %d",
 			bitforce->drv->name, bitforce->device_id, err);
@@ -132,7 +131,7 @@ static void bitforce_initialise(struct cgpu_info *bitforce, bool lock)
 
 	// Set Modem Control
 	err = usb_transfer(bitforce, FTDI_TYPE_OUT, FTDI_REQUEST_MODEM,
-				FTDI_VALUE_MODEM, bitforce->usbdev->found->interface, C_SETMODEM);
+				FTDI_VALUE_MODEM, interface, C_SETMODEM);
 	if (opt_debug)
 		applog(LOG_DEBUG, "%s%i: setmodemctrl got err %d",
 			bitforce->drv->name, bitforce->device_id, err);
@@ -142,7 +141,7 @@ static void bitforce_initialise(struct cgpu_info *bitforce, bool lock)
 
 	// Clear any sent data
 	err = usb_transfer(bitforce, FTDI_TYPE_OUT, FTDI_REQUEST_RESET,
-				FTDI_VALUE_PURGE_TX, bitforce->usbdev->found->interface, C_PURGETX);
+				FTDI_VALUE_PURGE_TX, interface, C_PURGETX);
 	if (opt_debug)
 		applog(LOG_DEBUG, "%s%i: purgetx got err %d",
 			bitforce->drv->name, bitforce->device_id, err);
@@ -152,7 +151,7 @@ static void bitforce_initialise(struct cgpu_info *bitforce, bool lock)
 
 	// Clear any received data
 	err = usb_transfer(bitforce, FTDI_TYPE_OUT, FTDI_REQUEST_RESET,
-				FTDI_VALUE_PURGE_RX, bitforce->usbdev->found->interface, C_PURGERX);
+				FTDI_VALUE_PURGE_RX, interface, C_PURGERX);
 	if (opt_debug)
 		applog(LOG_DEBUG, "%s%i: purgerx got err %d",
 			bitforce->drv->name, bitforce->device_id, err);
@@ -163,7 +162,7 @@ failed:
 		mutex_unlock(&bitforce->device_mutex);
 }
 
-static bool bitforce_detect_one(struct libusb_device *dev, struct usb_find_devices *found)
+static struct cgpu_info *bitforce_detect_one(struct libusb_device *dev, struct usb_find_devices *found)
 {
 	char buf[BITFORCE_BUFSIZ+1];
 	int err, amount;
@@ -271,7 +270,7 @@ reinit:
 
 	mutex_init(&bitforce->device_mutex);
 
-	return true;
+	return bitforce;
 
 unshin:
 
@@ -286,10 +285,10 @@ shin:
 
 	bitforce = usb_free_cgpu(bitforce);
 
-	return false;
+	return NULL;
 }
 
-static void bitforce_detect(void)
+static void bitforce_detect(bool __maybe_unused hotplug)
 {
 	usb_detect(&bitforce_drv, bitforce_detect_one);
 }
@@ -484,18 +483,18 @@ re_send:
 	memcpy(ob + 8 + 32, work->data + 64, 12);
 	if (!bitforce->nonce_range) {
 		sprintf((char *)ob + 8 + 32 + 12, ">>>>>>>>");
-		work->blk.nonce = bitforce->nonces = 0xffffffff;
+		work->nonce = bitforce->nonces = 0xffffffff;
 		len = 60;
 	} else {
 		uint32_t *nonce;
 
 		nonce = (uint32_t *)(ob + 8 + 32 + 12);
-		*nonce = htobe32(work->blk.nonce);
+		*nonce = htobe32(work->nonce);
 		nonce = (uint32_t *)(ob + 8 + 32 + 12 + 4);
 		/* Split work up into 1/5th nonce ranges */
 		bitforce->nonces = 0x33333332;
-		*nonce = htobe32(work->blk.nonce + bitforce->nonces);
-		work->blk.nonce += bitforce->nonces + 1;
+		*nonce = htobe32(work->nonce + bitforce->nonces);
+		work->nonce += bitforce->nonces + 1;
 		sprintf((char *)ob + 8 + 32 + 12 + 8, ">>>>>>>>");
 		len = 68;
 	}
@@ -635,12 +634,12 @@ static int64_t bitforce_get_result(struct thr_info *thr, struct work *work)
 #ifndef __BIG_ENDIAN__
 		nonce = swab32(nonce);
 #endif
-		if (unlikely(bitforce->nonce_range && (nonce >= work->blk.nonce ||
-			(work->blk.nonce > 0 && nonce < work->blk.nonce - bitforce->nonces - 1)))) {
+		if (unlikely(bitforce->nonce_range && (nonce >= work->nonce ||
+			(work->nonce > 0 && nonce < work->nonce - bitforce->nonces - 1)))) {
 				applog(LOG_WARNING, "%s%i: Disabling broken nonce range support",
 					bitforce->drv->name, bitforce->device_id);
 				bitforce->nonce_range = false;
-				work->blk.nonce = 0xffffffff;
+				work->nonce = 0xffffffff;
 				bitforce->sleep_ms *= 5;
 				bitforce->kname = KNAME_WORK;
 		}
@@ -741,7 +740,7 @@ static struct api_data *bitforce_api_stats(struct cgpu_info *cgpu)
 }
 
 struct device_drv bitforce_drv = {
-	.drv_id = DRIVER_BITFORCE,
+	.drv_id = DRIVER_bitforce,
 	.dname = "BitForce",
 	.name = "BFL",
 	.drv_detect = bitforce_detect,
