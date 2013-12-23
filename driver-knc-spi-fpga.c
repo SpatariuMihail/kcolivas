@@ -883,9 +883,9 @@ static void knc_flush_work(struct cgpu_info *cgpu)
 		knc_active_fifo_inc_idx(&next_read_a);
 	}
 
-/*	len = _internal_knc_flush_fpga(knc);
+	len = _internal_knc_flush_fpga(knc);
 	if (len > 0)
-		knc_process_response(NULL, cgpu, &spi_rxbuf); */
+		knc_process_response(NULL, cgpu, &spi_rxbuf);
 	mutex_unlock(&knc->lock);
 }
 
