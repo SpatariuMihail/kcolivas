@@ -975,13 +975,11 @@ static void *bitmain_get_results(void *userdata)
 	const int rsize = BITMAIN_FTDI_READSIZE;
 	char readbuf[BITMAIN_READBUF_SIZE];
 	struct thr_info *thr = info->thr;
-	cgtimer_t ts_start;
 	char threadname[24];
 	int errorcount = 0;
 
 	snprintf(threadname, 24, "btm_recv/%d", bitmain->device_id);
 	RenameThread(threadname);
-	cgsleep_prepare_r(&ts_start);
 
 	while (likely(!bitmain->shutdown)) {
 		unsigned char buf[rsize];
@@ -1022,12 +1020,9 @@ static void *bitmain_get_results(void *userdata)
 			errorcount++;
 			if(errorcount > 100) {
 				applog(LOG_ERR, "bitmain_read errorcount ret=%d", ret);
-				cgsleep_prepare_r(&ts_start);
-				cgsleep_ms_r(&ts_start, 20);
+				cgsleep_ms(20);
 				errorcount = 0;
 			}
-			//cgsleep_prepare_r(&ts_start);
-			//cgsleep_ms_r(&ts_start, 200);
 			continue;
 		}
 
@@ -1232,10 +1227,15 @@ static void bitmain_usb_init(struct cgpu_info *bitmain)
 {
 	int err, interface;
 
+#ifndef WIN32
+	return;
+#endif
+
 	if (bitmain->usbinfo.nodev)
 		return;
 
 	interface = usb_interface(bitmain);
+
 	// Reset
 	err = usb_transfer(bitmain, FTDI_TYPE_OUT, FTDI_REQUEST_RESET,
 		FTDI_VALUE_RESET, interface, C_RESET);
@@ -1336,7 +1336,6 @@ static struct cgpu_info * bitmain_usb_detect_one(libusb_device *dev, struct usb_
 	asic_num = BITMAIN_DEFAULT_ASIC_NUM;
 	timeout = BITMAIN_DEFAULT_TIMEOUT;
 	frequency = BITMAIN_DEFAULT_FREQUENCY;
-	memset(info->reg_data, 0, 4);
 
 	if (!usb_init(bitmain, dev, found))
 		goto shin;

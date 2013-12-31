@@ -109,6 +109,8 @@ CGMiner specific configuration options:
   --enable-bitfury        Compile support for BitFury ASICs (default disabled)
   --enable-hashfast       Compile support for Hashfast (default disabled)
   --enable-icarus         Compile support for Icarus (default disabled)
+  --enable-bmsc           Compile support for BitMain Single Chain(default disabled)
+  --enable-bitmain        Compile support for BitMain Multi Chain(default disabled)
   --enable-knc            Compile support for KnC miners (default disabled)
   --enable-bab            Compile support for BlackArrow Bitfury (default disabled)
   --enable-klondike       Compile support for Klondike (default disabled)

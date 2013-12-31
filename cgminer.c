@@ -5099,6 +5099,7 @@ static void hashmeter(int thr_id, struct timeval *diff,
 
 	dh64 = (double)total_mhashes_done / total_secs * 1000000ull;
 	dr64 = (double)total_rolling * 1000000ull;
+	g_displayed_rolling = total_rolling / 1000.0;
 	suffix_string(dh64, displayed_hashes, sizeof(displayed_hashes), 4);
 	suffix_string(dr64, displayed_rolling, sizeof(displayed_rolling), 4);
 
@@ -6142,6 +6143,31 @@ bool submit_nonce(struct thr_info *thr, struct work *work, uint32_t nonce)
 	}
 
 	return true;
+}
+
+bool submit_nonce_1(struct thr_info *thr, struct work *work, uint32_t nonce, int * nofull)
+{
+	*nofull = 0;
+	if (test_nonce(work, nonce)) {
+		update_work_stats(thr, work);
+
+		if (!fulltest(work->hash, work->target)) {
+			*nofull = 1;
+			applog(LOG_INFO, "Share above target");
+			return false;
+		}
+	} else {
+		inc_hw_errors(thr);
+		return false;
+	}
+	return true;
+}
+
+void submit_nonce_2(struct work *work)
+{
+	struct work *work_out;
+	work_out = copy_work(work);
+	submit_work_async(work_out);
 }
 
 /* Allows drivers to submit work items where the driver has changed the ntime

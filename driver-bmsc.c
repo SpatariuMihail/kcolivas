@@ -758,6 +758,9 @@ static struct cgpu_info *bmsc_detect_one(struct libusb_device *dev, struct usb_f
 	char msg[10240] = {0};
 	int sendfreqstatus = 1;
 
+	if (opt_bmsc_options == NULL)
+		return NULL;
+
 	if ((sizeof(workdata) << 1) != (sizeof(golden_ob) - 1))
 		quithere(1, "Data and golden_ob sizes don't match");
 
@@ -1141,7 +1144,6 @@ static void bmsc_detect(bool __maybe_unused hotplug)
 static bool bmsc_prepare(__maybe_unused struct thr_info *thr)
 {
 //	struct cgpu_info *bmsc = thr->cgpu;
-
 	return true;
 }
 
@@ -1298,6 +1300,255 @@ out:
 	free_work(work);
 	return hash_count;
 }
+/*
+static int64_t bmsc_scanwork(struct thr_info *thr)
+{
+	struct cgpu_info *bmsc = thr->cgpu;
+	struct BMSC_INFO *info = (struct BMSC_INFO *)(bmsc->device_data);
+	int ret, err, amount;
+	unsigned char nonce_bin[BMSC_READ_SIZE];
+	struct BMSC_WORK workdata;
+	char *ob_hex;
+	uint32_t nonce;
+	int64_t hash_count = 0;
+	int64_t hash_done = 0;
+	struct timeval tv_start, tv_finish, elapsed;
+	struct timeval tv_history_start, tv_history_finish;
+	double Ti, Xi;
+	int curr_hw_errors;
+	bool was_hw_error;
+	struct work *work;
+
+	struct BMSC_HISTORY *history0, *history;
+	double Hs, W, fullnonce;
+	bool limited;
+	int64_t estimate_hashes;
+	uint32_t values;
+	int64_t hash_count_range;
+
+	int i = 0, count = 0, nofullcount = 0, readalllen = 0, readlen = 0, read_time = 0, nofull = 0;
+	bool nonceok = false;
+	bool noncedup = false;
+
+	char testbuf[256] = {0};
+	char testtmp[256] = {0};
+	int asicnum = 0;
+	int k = 0;
+
+	// Device is gone
+	if (bmsc->usbinfo.nodev)
+		return -1;
+
+	elapsed.tv_sec = elapsed.tv_usec = 0;
+
+	work = get_work(thr, thr->id);
+	memset((void *)(&workdata), 0, sizeof(workdata));
+	memcpy(&(workdata.midstate), work->midstate, BMSC_MIDSTATE_SIZE);
+	memcpy(&(workdata.work), work->data + BMSC_WORK_DATA_OFFSET, BMSC_WORK_SIZE);
+	rev((void *)(&(workdata.midstate)), BMSC_MIDSTATE_SIZE);
+	rev((void *)(&(workdata.work)), BMSC_WORK_SIZE);
+
+	applog(LOG_DEBUG, "bmsc_scanhash start ------------");
+
+	readalllen = 0;
+	readlen = 0;
+	if(info->work_queue != NULL) {
+		while (true) {
+			if (bmsc->usbinfo.nodev)
+				return -1;
+			amount = 0;
+			memset(nonce_bin, 0, sizeof(nonce_bin));
+			err = usb_read_once_timeout(bmsc, (char *)nonce_bin+readlen, 5-readlen, &amount, BMSC_WAIT_TIMEOUT, C_GETRESULTS);
+			if (err < 0 && err != LIBUSB_ERROR_TIMEOUT) {
+				applog(LOG_ERR, "%s%i: Comms error (rerr=%d amt=%d)", bmsc->drv->name, bmsc->device_id, err, amount);
+				dev_error(bmsc, REASON_DEV_COMMS_ERROR);
+				return 0;
+			}
+			if (amount > 0) {
+				readalllen += amount;
+				readlen += amount;
+				if (readlen >= 5) {
+					nonceok = false;
+
+					memcpy((char *) &nonce, nonce_bin, BMSC_READ_SIZE);
+					noncedup = false;
+					for(i = 0; i < BMSC_NONCE_ARRAY_SIZE; i++) {
+						if(memcmp(nonce_bin, info->nonce_bin[i], BMSC_READ_SIZE) == 0) {
+							noncedup = true;
+							break;
+						}
+					}
+					if (!noncedup) {
+						if(info->nonce_index < 0 || info->nonce_index >= BMSC_NONCE_ARRAY_SIZE)
+							info->nonce_index = 0;
+
+						memcpy(info->nonce_bin[info->nonce_index], nonce_bin, BMSC_READ_SIZE);
+						info->nonce_index++;
+
+						nonce = htobe32(nonce);
+
+						nofull = 0;
+						if (submit_nonce_1(thr, info->work_queue, nonce, &nofull)) {
+							applog(LOG_DEBUG, "Bmsc nonce(0x%08x) match old work", nonce);
+							submit_nonce_2(info->work_queue);
+							nonceok = true;
+						} else {
+							if(!nofull) {
+								applog(LOG_DEBUG, "Bmsc nonce(0x%08x) not match old work", nonce);
+								usb_buffer_clear(bmsc);
+								inc_hw_errors(thr);
+								break;
+							} else {
+								nofullcount++;
+							}
+						}
+					} else {
+						applog(LOG_DEBUG, "Bmsc nonce duplication");
+					}
+
+					if (nonceok) {
+						count++;
+						hash_count = (nonce & info->nonce_mask);
+						hash_count++;
+						hash_count *= info->fpga_count;
+						hash_done += 0xffffffff;//hash_count;
+
+						applog(LOG_DEBUG, "%s%d: nonce = 0x%08x = 0x%08lX hashes (%ld.%06lds)",
+								bmsc->drv->name, bmsc->device_id, nonce, (long unsigned int )hash_count, elapsed.tv_sec, elapsed.tv_usec);
+					}
+					readlen = 0;
+				}
+			} else {
+				//usb_buffer_clear(bmsc);
+				applog(LOG_DEBUG, "bmsc_scanhash usb_read_once_timeout read time out");
+				break;
+			}
+		}
+	}
+
+	err = usb_write(bmsc, (char *)(&workdata), sizeof(workdata), &amount, C_SENDWORK);
+	if (err < 0 || amount != sizeof(workdata)) {
+		applog(LOG_ERR, "%s%i: Comms error (werr=%d amt=%d)", bmsc->drv->name, bmsc->device_id, err, amount);
+		dev_error(bmsc, REASON_DEV_COMMS_ERROR);
+		bmsc_initialise(bmsc, info->baud);
+		return 0;
+	}
+
+	if (opt_debug) {
+		ob_hex = bin2hex((char *)&workdata, sizeof(workdata));
+		applog(LOG_DEBUG, "%s%d: sent %s", bmsc->drv->name, bmsc->device_id, ob_hex);
+		free(ob_hex);
+	}
+
+	cgtime(&tv_start);
+	readlen = 0;
+	while(true) {
+		if (bmsc->usbinfo.nodev)
+			return -1;
+		amount = 0;
+		memset(nonce_bin, 0, sizeof(nonce_bin));
+		err = usb_read_once_timeout(bmsc, (char *)nonce_bin+readlen, 5-readlen, &amount, BMSC_WAIT_TIMEOUT, C_GETRESULTS);
+		cgtime(&tv_finish);
+		if (err < 0 && err != LIBUSB_ERROR_TIMEOUT) {
+			applog(LOG_ERR, "%s%i: Comms error (rerr=%d amt=%d)", bmsc->drv->name, bmsc->device_id, err, amount);
+			dev_error(bmsc, REASON_DEV_COMMS_ERROR);
+			return 0;
+		}
+		if(amount > 0) {
+			readalllen += amount;
+			readlen += amount;
+			if (readlen >= 5) {
+				nonceok = false;
+
+				memcpy((char *) &nonce, nonce_bin, BMSC_READ_SIZE);
+				noncedup = false;
+				for(i = 0; i < BMSC_NONCE_ARRAY_SIZE; i++) {
+					if(memcmp(nonce_bin, info->nonce_bin[i], BMSC_READ_SIZE) == 0) {
+						noncedup = true;
+						break;
+					}
+				}
+				if(!noncedup) {
+					if(info->nonce_index < 0 || info->nonce_index >= BMSC_NONCE_ARRAY_SIZE)
+						info->nonce_index = 0;
+
+					memcpy(info->nonce_bin[info->nonce_index], nonce_bin, BMSC_READ_SIZE);
+					info->nonce_index++;
+
+					nonce = htobe32(nonce);
+					nofull = 0;
+					if (submit_nonce_1(thr, work, nonce, &nofull)) {
+						applog(LOG_DEBUG, "Bmsc nonce(0x%08x) match current work", nonce);
+						submit_nonce_2(work);
+						nonceok = true;
+					} else {
+						if(!nofull) {
+							if (info->work_queue != NULL) {
+								nofull = 0;
+								if (submit_nonce_1(thr, info->work_queue, nonce, &nofull)) {
+									applog(LOG_DEBUG, "Bmsc nonce(0x%08x) match old work", nonce);
+									submit_nonce_2(info->work_queue);
+									nonceok = true;
+								} else {
+									if(!nofull) {
+										applog(LOG_DEBUG, "Bmsc nonce(0x%08x) not match work", nonce);
+										usb_buffer_clear(bmsc);
+										inc_hw_errors(thr);
+										break;
+									} else {
+										nofullcount++;
+									}
+								}
+							} else {
+								applog(LOG_DEBUG, "Bmsc nonce(0x%08x) no old work", nonce);
+							}
+						} else {
+							nofullcount++;
+						}
+					}
+				} else {
+					applog(LOG_DEBUG, "Bmsc nonce duplication");
+				}
+
+				if(nonceok) {
+					count++;
+					hash_count = (nonce & info->nonce_mask);
+					hash_count++;
+					hash_count *= info->fpga_count;
+					hash_done += 0xffffffff;//hash_count;
+
+					applog(LOG_DEBUG, "%s%d: nonce = 0x%08x = 0x%08lX hashes (%ld.%06lds)",
+					bmsc->drv->name, bmsc->device_id, nonce, (long unsigned int )hash_count, elapsed.tv_sec, elapsed.tv_usec);
+				}
+				readlen = 0;
+			}
+		} else {
+			applog(LOG_DEBUG, "bmsc_scanhash usb_read_once_timeout read time out");
+		}
+
+		read_time = SECTOMS(tdiff(&tv_finish, &tv_start));
+		if(read_time >= info->read_time) {
+			if (readalllen > 0)
+				applog(LOG_DEBUG, "Bmsc Read: Nonce ok:%d below:%d in %d ms", count, nofullcount, read_time);
+			else
+				applog(LOG_DEBUG, "Bmsc Read: No nonce work %d for %d ms", work->id, read_time);
+
+			break;
+		}
+	}
+
+	if(info->work_queue != NULL) {
+		free_work(info->work_queue);
+		info->work_queue = NULL;
+	}
+
+	info->work_queue = copy_work(work);
+
+	applog(LOG_DEBUG, "bmsc_scanhash stop ------------");
+out:
+	free_work(work);
+	return hash_count;
+}*/
 
 static struct api_data *bmsc_api_stats(struct cgpu_info *cgpu)
 {
