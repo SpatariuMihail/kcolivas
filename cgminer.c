@@ -9031,7 +9031,15 @@ retry:
 			}
 			gen_stratum_work(pool, work);
 			applog(LOG_DEBUG, "Generated stratum work");
-			stage_work(work);
+			for (i = 0; i < work->drv_rolllimit; i++) {
+				struct work *work_clone;
+
+				roll_work(work);
+				work_clone = make_clone(work);
+				work_clone->drv_rolllimit = 0;
+				stage_work(work_clone);
+			}
+			free_work(work);
 			continue;
 		}
 

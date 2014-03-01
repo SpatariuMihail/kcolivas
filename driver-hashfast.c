@@ -386,8 +386,12 @@ static bool hfa_reset(struct cgpu_info *hashfast, struct hashfast_info *info)
 	 * been inherited across a restart. */
 	if (!info->hash_clock_rate)
 		info->hash_clock_rate = opt_hfa_hash_clock;
+#if 0
+	/* Firmware doesn't do anything with these yet but hard disable
+	 * rolling in case future firmware does. */
 	info->group_ntime_roll = opt_hfa_ntime_roll;
 	info->core_ntime_roll = 1;
+#endif
 
 	// Assemble the USB_INIT request
 	memset(hu, 0, sizeof(*hu));
