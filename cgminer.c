@@ -3660,6 +3660,8 @@ static inline bool can_roll(struct work *work)
 		work->rolls < 7000 && !stale_work(work, false));
 }
 
+static char *offset_ntime(const char *ntime, int noffset);
+
 static void roll_work(struct work *work)
 {
 	uint32_t *work_ntime;
@@ -3673,6 +3675,9 @@ static void roll_work(struct work *work)
 	work->rolls++;
 	work->nonce = 0;
 	applog(LOG_DEBUG, "Successfully rolled work");
+
+	if (work->ntime)
+		work->ntime = offset_ntime(work->ntime, 1);
 
 	/* This is now a different work item so it needs a different ID for the
 	 * hashtable */
