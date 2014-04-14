@@ -180,6 +180,9 @@ struct knc_state {
 	unsigned int last_hour_shares_index[MAX_ASICS][256];
 	unsigned int last_hour_hwerrs_index[MAX_ASICS][256];
 
+	unsigned int raw_shares[MAX_ASICS][CORES_PER_ASIC];
+	unsigned int raw_hwerrs[MAX_ASICS][CORES_PER_ASIC];
+
 	pthread_mutex_t lock;
 };
 
@@ -356,6 +359,7 @@ static inline void stats_good_share(struct knc_state *knc, uint32_t asic, uint32
 		return;
 	unsigned int cur_minute = (ts->tv_sec / SECONDS_IN_MINUTE) % (KNC_MINUTES_IN_STATS_BUFFER + 1);
 	stats_update(knc->last_hour_shares[asic][core], &(knc->last_hour_shares_index[asic][core]), cur_minute);
+	knc->raw_shares[asic][core]++;
 }
 
 static inline void stats_bad_share(struct knc_state *knc, uint32_t asic, uint32_t core, struct timespec *ts)
@@ -364,6 +368,7 @@ static inline void stats_bad_share(struct knc_state *knc, uint32_t asic, uint32_
 		return;
 	unsigned int cur_minute = (ts->tv_sec / SECONDS_IN_MINUTE) % (KNC_MINUTES_IN_STATS_BUFFER + 1);
 	stats_update(knc->last_hour_hwerrs[asic][core], &(knc->last_hour_hwerrs_index[asic][core]), cur_minute);
+	knc->raw_hwerrs[asic][core]++;
 }
 
 static inline unsigned int get_hour_shares(struct knc_state *knc, uint32_t asic, uint32_t core, struct timespec *ts)
@@ -393,6 +398,36 @@ static struct api_data *knc_api_stats(struct cgpu_info *cgpu)
 
 	clock_gettime(CLOCK_MONOTONIC, &ts_now);
 
+	for (asic = 0; asic < MAX_ASICS; ++asic) {
+		char asic_name[128];
+		snprintf(asic_name, sizeof(asic_name), "asic_%d_raw_shares", asic + 1);
+		cursize = 0;
+		for (core = 0; core < CORES_PER_ASIC; ++core) {
+			n = snprintf(buf + cursize, sizeof(buf) - cursize, "%d,", knc->raw_shares[asic][core]);
+			cursize += n;
+			if (sizeof(buf) < cursize) {
+				cursize = sizeof(buf);
+				break;
+			}
+		}
+		if (0 < cursize)
+			buf[cursize - 1] = '\0'; /* last comma */
+		root = api_add_string(root, asic_name, buf, true);
+
+		snprintf(asic_name, sizeof(asic_name), "asic_%d_raw_hwerrs", asic + 1);
+		cursize = 0;
+		for (core = 0; core < CORES_PER_ASIC; ++core) {
+			n = snprintf(buf + cursize, sizeof(buf) - cursize, "%d,", knc->raw_hwerrs[asic][core]);
+			cursize += n;
+			if (sizeof(buf) < cursize) {
+				cursize = sizeof(buf);
+				break;
+			}
+		}
+		if (0 < cursize)
+			buf[cursize - 1] = '\0'; /* last comma */
+		root = api_add_string(root, asic_name, buf, true);
+	}
 	for (asic = 0; asic < MAX_ASICS; ++asic) {
 		char asic_name[128];
 		snprintf(asic_name, sizeof(asic_name), "asic_%d_shares", asic + 1);
