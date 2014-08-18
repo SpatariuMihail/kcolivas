@@ -153,6 +153,8 @@ static struct timeval history_sec = { HISTORY_SEC, 0 };
 // keeping a ongoing average of recent data
 #define INFO_HISTORY 10
 
+#define BMSC_WORK_QUEUE_NUM 36
+
 struct BMSC_HISTORY {
 	struct timeval finish;
 	double sumXiTi;
@@ -218,13 +220,15 @@ struct BMSC_INFO {
 	bool speed_next_work;
 	bool flash_next_work;
 
-	struct work * work_queue;
+	struct work * work_queue[BMSC_WORK_QUEUE_NUM];
+	int work_queue_index;
+
 	unsigned char nonce_bin[BMSC_NONCE_ARRAY_SIZE][BMSC_READ_SIZE+1];
 	int nonce_index;
 };
 
 #define BMSC_MIDSTATE_SIZE 32
-#define BMSC_UNUSED_SIZE 16
+#define BMSC_UNUSED_SIZE 15
 #define BMSC_WORK_SIZE 12
 
 #define BMSC_WORK_DATA_OFFSET 64
@@ -256,6 +260,7 @@ struct BMSC_WORK {
 	uint8_t cmd;
 	uint8_t prefix;
 	uint8_t unused[BMSC_UNUSED_SIZE];
+	uint8_t workid;
 	uint8_t work[BMSC_WORK_SIZE];
 };
 
@@ -479,18 +484,6 @@ static void bmsc_initialise(struct cgpu_info *bmsc, int baud)
 		default:
 			quit(1, "bmsc_intialise() called with invalid %s cgid %i ident=%d",
 				bmsc->drv->name, bmsc->cgminer_id, ident);
-	}
-}
-
-static void rev(unsigned char *s, size_t l)
-{
-	size_t i, j;
-	unsigned char t;
-
-	for (i = 0, j = l - 1; i < j; i++, j--) {
-		t = s[i];
-		s[i] = s[j];
-		s[j] = t;
 	}
 }
 
@@ -757,6 +750,7 @@ static struct cgpu_info *bmsc_detect_one(struct libusb_device *dev, struct usb_f
 	int nodata = 0;
 	char msg[10240] = {0};
 	int sendfreqstatus = 1;
+	int k = 0;
 
 	if (opt_bmsc_options == NULL)
 		return NULL;
@@ -802,13 +796,32 @@ static struct cgpu_info *bmsc_detect_one(struct libusb_device *dev, struct usb_f
 			quit(1, "%s bmsc_detect_one() invalid %s ident=%d",
 				bmsc->drv->dname, bmsc->drv->dname, info->ident);
 	}
-
 // For CMR2 test each USB Interface
 cmr2_retry:
 	tries = 2;
 	ok = false;
 	while (!ok && tries-- > 0) {
 		bmsc_initialise(bmsc, baud);
+
+		if (opt_bmsc_gray) {
+			cmd_buf[0] = 3;
+			cmd_buf[0] |= 0x80;
+			cmd_buf[1] = 0; //16-23
+			cmd_buf[2] = 0x80;  //8-15
+			cmd_buf[3] = 0x80;  //0-7
+			cmd_buf[3] = CRC5(cmd_buf, 27);
+			cmd_buf[3] |= 0x80;
+
+			applog(LOG_ERR, "-----------------start gray-------------------");
+			cgsleep_ms(500);
+			applog(LOG_ERR, "Send gray %02x%02x%02x%02x", cmd_buf[0], cmd_buf[1], cmd_buf[2], cmd_buf[3]);
+			err = usb_write_ii(bmsc, info->intinfo, (char * )cmd_buf, 4, &amount, C_SENDWORK);
+			if (err != LIBUSB_SUCCESS || amount != 4) {
+				applog(LOG_ERR, "%s%i: Write freq Comms error (werr=%d amount=%d)", bmsc->drv->name, bmsc->device_id, err, amount);
+				continue;
+			}
+			applog(LOG_DEBUG, "Send gray ok");
+		}
 
 		if (opt_bmsc_freq) {
 			if (strcmp(opt_bmsc_freq, "0") != 0) {
@@ -824,6 +837,7 @@ cmr2_retry:
 				cmd_buf[0] |= 0x80;
 				cmd_buf[1] = reg_data[0]; //16-23
 				cmd_buf[2] = reg_data[1];  //8-15
+				cmd_buf[3] = 0;
 				cmd_buf[3] = CRC5(cmd_buf, 27);
 				applog(LOG_DEBUG, "Set_frequency cmd_buf[1]{%02x}cmd_buf[2]{%02x}", cmd_buf[1], cmd_buf[2]);
 
@@ -831,6 +845,7 @@ cmr2_retry:
 				rdreg_buf[0] |= 0x80;
 				rdreg_buf[1] = 0; //16-23
 				rdreg_buf[2] = 0x04;  //8-15
+				rdreg_buf[3] = 0;
 				rdreg_buf[3] = CRC5(rdreg_buf, 27);
 
 				applog(LOG_ERR, "-----------------start freq-------------------");
@@ -924,6 +939,7 @@ cmr2_retry:
 			rdreg_buf[0] |= 0x80;
 			rdreg_buf[1] = 0; //16-23
 			rdreg_buf[2] = reg_data[0];  //8-15
+			rdreg_buf[3] = 0;
 			rdreg_buf[3] = CRC5(rdreg_buf, 27);
 			applog(LOG_DEBUG, "Get_status rdreg_buf[1]{%02x}rdreg_buf[2]{%02x}", rdreg_buf[1], rdreg_buf[2]);
 
@@ -983,7 +999,7 @@ cmr2_retry:
 			continue;
 
 		memset(nonce_bin, 0, sizeof(nonce_bin));
-		ret = bmsc_get_nonce(bmsc, nonce_bin, &tv_start, &tv_finish, NULL, 100);
+		ret = bmsc_get_nonce(bmsc, nonce_bin, &tv_start, &tv_finish, NULL, 500);
 		if (ret != BTM_NONCE_OK) {
 			applog(LOG_ERR, "Bmsc recv golden nonce timeout");
 			continue;
@@ -993,6 +1009,7 @@ cmr2_retry:
 		if (strncmp(nonce_hex, golden_nonce, 8) == 0)
 			ok = true;
 		else {
+			applog(LOG_ERR, "Bmsc recv golden nonce %s != %s and retry", nonce_hex, golden_nonce);
 			if (tries < 0 && info->ident != IDENT_CMR2) {
 				applog(LOG_ERR, "Bmsc Detect: Test failed at %s: get %s, should: %s",
 					bmsc->device_path, nonce_hex, golden_nonce);
@@ -1074,6 +1091,10 @@ cmr2_retry:
 	info->work_division = work_division;
 	info->fpga_count = fpga_count;
 	info->nonce_mask = mask(work_division);
+	info->work_queue_index = 0;
+	for(k = 0; k < BMSC_WORK_QUEUE_NUM; k++) {
+		info->work_queue[k] = NULL;
+	}
 
 	info->golden_hashes = (golden_nonce_val & info->nonce_mask) * fpga_count;
 	timersub(&tv_finish, &tv_start, &(info->golden_tv));
@@ -1201,7 +1222,8 @@ static int64_t bmsc_scanwork(struct thr_info *thr)
 	double Ti, Xi;
 	int curr_hw_errors, i;
 	bool was_hw_error;
-	struct work *work;
+	struct work *work = NULL;
+	struct work *worktmp = NULL;
 
 	struct BMSC_HISTORY *history0, *history;
 	int count;
@@ -1211,6 +1233,9 @@ static int64_t bmsc_scanwork(struct thr_info *thr)
 	int64_t estimate_hashes;
 	uint32_t values;
 	int64_t hash_count_range;
+	unsigned char workid = 0;
+	int submitfull = 0;
+	bool submitnonceok = true;
 
 	// Device is gone
 	if (bmsc->usbinfo.nodev)
@@ -1225,16 +1250,22 @@ static int64_t bmsc_scanwork(struct thr_info *thr)
 	rev((void *)(&(workdata.midstate)), BMSC_MIDSTATE_SIZE);
 	rev((void *)(&(workdata.work)), BMSC_WORK_SIZE);
 
-	if (info->speed_next_work || info->flash_next_work)
-		cmr2_commands(bmsc);
+	workdata.workid = work->id;
+	workid = work->id;
+	workid = workid & 0x1F;
 
 	// We only want results for the work we are about to send
-	usb_buffer_clear(bmsc);
+	//usb_buffer_clear(bmsc);
+
+	if(info->work_queue[workid]) {
+		free(info->work_queue[workid]);
+		info->work_queue[workid] = NULL;
+	}
+	info->work_queue[workid] = copy_work(work);
 
 	err = usb_write_ii(bmsc, info->intinfo, (char *)(&workdata), sizeof(workdata), &amount, C_SENDWORK);
 	if (err < 0 || amount != sizeof(workdata)) {
-		applog(LOG_ERR, "%s%i: Comms error (werr=%d amt=%d)",
-				bmsc->drv->name, bmsc->device_id, err, amount);
+		applog(LOG_ERR, "%s%i: Comms error (werr=%d amt=%d)", bmsc->drv->name, bmsc->device_id, err, amount);
 		dev_error(bmsc, REASON_DEV_COMMS_ERROR);
 		bmsc_initialise(bmsc, info->baud);
 		goto out;
@@ -1242,8 +1273,7 @@ static int64_t bmsc_scanwork(struct thr_info *thr)
 
 	if (opt_debug) {
 		ob_hex = bin2hex((void *)(&workdata), sizeof(workdata));
-		applog(LOG_DEBUG, "%s%d: sent %s",
-			bmsc->drv->name, bmsc->device_id, ob_hex);
+		applog(LOG_DEBUG, "%s%d: sent %s", bmsc->drv->name, bmsc->device_id, ob_hex);
 		free(ob_hex);
 	}
 
@@ -1259,18 +1289,14 @@ static int64_t bmsc_scanwork(struct thr_info *thr)
 
 		// ONLY up to just when it aborted
 		// We didn't read a reply so we don't subtract BMSC_READ_TIME
-		estimate_hashes = ((double)(elapsed.tv_sec)
-					+ ((double)(elapsed.tv_usec))/((double)1000000)) / info->Hs;
+		estimate_hashes = ((double)(elapsed.tv_sec) + ((double)(elapsed.tv_usec))/((double)1000000)) / info->Hs;
 
 		// If some Serial-USB delay allowed the full nonce range to
 		// complete it can't have done more than a full nonce
 		if (unlikely(estimate_hashes > 0xffffffff))
 			estimate_hashes = 0xffffffff;
 
-		applog(LOG_DEBUG, "%s%d: no nonce = 0x%08lX hashes (%ld.%06lds)",
-				bmsc->drv->name, bmsc->device_id,
-				(long unsigned int)estimate_hashes,
-				elapsed.tv_sec, elapsed.tv_usec);
+		applog(LOG_DEBUG, "%s%d: no nonce = 0x%08lX hashes (%ld.%06lds)", bmsc->drv->name, bmsc->device_id, (long unsigned int)estimate_hashes, elapsed.tv_sec, elapsed.tv_usec);
 
 		hash_count = 0;
 		goto out;
@@ -1279,7 +1305,26 @@ static int64_t bmsc_scanwork(struct thr_info *thr)
 	memcpy((char *)&nonce, nonce_bin, sizeof(nonce_bin));
 	nonce = htobe32(nonce);
 	curr_hw_errors = bmsc->hw_errors;
-	submit_nonce(thr, work, nonce);
+
+	workid = nonce_bin[4];
+	workid = workid & 0x1F;
+	worktmp = info->work_queue[workid];
+	if(worktmp) {
+		submitfull = 0;
+		if(submit_nonce_1(thr, worktmp, nonce, &submitfull)) {
+			submitnonceok = true;
+			submit_nonce_2(worktmp);
+		} else {
+			if(submitfull) {
+				submitnonceok = true;
+			} else {
+				submitnonceok = false;
+			}
+		}
+	} else {
+		applog(LOG_ERR, "%s%d: work %02x not find error", bmsc->drv->name, bmsc->device_id, workid);
+	}
+
 	was_hw_error = (curr_hw_errors > bmsc->hw_errors);
 
 	hash_count = (nonce & info->nonce_mask);
@@ -1291,10 +1336,7 @@ static int64_t bmsc_scanwork(struct thr_info *thr)
 	if (opt_debug || info->do_bmsc_timing)
 		timersub(&tv_finish, &tv_start, &elapsed);
 
-	applog(LOG_DEBUG, "%s%d: nonce = 0x%08x = 0x%08lX hashes (%ld.%06lds)",
-			bmsc->drv->name, bmsc->device_id,
-			nonce, (long unsigned int)hash_count,
-			elapsed.tv_sec, elapsed.tv_usec);
+	applog(LOG_DEBUG, "%s%d: nonce = 0x%08x = 0x%08lX hashes (%ld.%06lds)", bmsc->drv->name, bmsc->device_id, nonce, (long unsigned int)hash_count, elapsed.tv_sec, elapsed.tv_usec);
 
 out:
 	free_work(work);

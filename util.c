@@ -725,7 +725,11 @@ bool fulltest(const unsigned char *hash, const unsigned char *target)
 		}
 	}
 
-	if (opt_debug) {
+#ifdef WIN32
+	if (0) {
+#else
+	if (0) {
+#endif
 		unsigned char hash_swap[32], target_swap[32];
 		char *hash_str, *target_str;
 
@@ -734,7 +738,7 @@ bool fulltest(const unsigned char *hash, const unsigned char *target)
 		hash_str = bin2hex(hash_swap, 32);
 		target_str = bin2hex(target_swap, 32);
 
-		applog(LOG_DEBUG, " Proof: %s\nTarget: %s\nTrgVal? %s",
+		applog(LOG_ERR, " Proof: %s\nTarget: %s\nTrgVal? %s",
 			hash_str,
 			target_str,
 			rc ? "YES (hash <= target)" :
@@ -1296,11 +1300,14 @@ static enum send_ret __stratum_send(struct pool *pool, char *s, ssize_t len)
 		struct timeval timeout = {1, 0};
 		ssize_t sent;
 		fd_set wd;
-
+retry:
 		FD_ZERO(&wd);
 		FD_SET(sock, &wd);
-		if (select(sock + 1, NULL, &wd, NULL, &timeout) < 1)
+		if (select(sock + 1, NULL, &wd, NULL, &timeout) < 1) {
+			if (interrupted())
+				goto retry;
 			return SEND_SELECTFAIL;
+		}
 #ifdef __APPLE__
 		sent = send(pool->sock, s + ssent, len, SO_NOSIGPIPE);
 #elif WIN32
@@ -1702,8 +1709,18 @@ static bool parse_diff(struct pool *pool, json_t *val)
 	return true;
 }
 
+static void __suspend_stratum(struct pool *pool)
+{
+	clear_sockbuf(pool);
+	pool->stratum_active = pool->stratum_notify = false;
+	if (pool->sock)
+		CLOSESOCKET(pool->sock);
+	pool->sock = 0;
+}
+
 static bool parse_reconnect(struct pool *pool, json_t *val)
 {
+	char *sockaddr_url, *stratum_port, *tmp;
 	char *url, *port, address[256];
 
 	memset(address, 0, 255);
@@ -1717,12 +1734,23 @@ static bool parse_reconnect(struct pool *pool, json_t *val)
 
 	sprintf(address, "%s:%s", url, port);
 
-	if (!extract_sockaddr(address, &pool->sockaddr_url, &pool->stratum_port))
+	if (!extract_sockaddr(address, &sockaddr_url, &stratum_port))
 		return false;
 
-	pool->stratum_url = pool->sockaddr_url;
-
 	applog(LOG_NOTICE, "Reconnect requested from pool %d to %s", pool->pool_no, address);
+
+	clear_pool_work(pool);
+
+	mutex_lock(&pool->stratum_lock);
+	__suspend_stratum(pool);
+	tmp = pool->sockaddr_url;
+	pool->sockaddr_url = sockaddr_url;
+	pool->stratum_url = pool->sockaddr_url;
+	free(tmp);
+	tmp = pool->stratum_port;
+	pool->stratum_port = stratum_port;
+	free(tmp);
+	mutex_unlock(&pool->stratum_lock);
 
 	if (!restart_stratum(pool))
 		return false;
@@ -2193,6 +2221,7 @@ static bool setup_stratum_socket(struct pool *pool)
 				applog(LOG_DEBUG, "Failed sock connect");
 				continue;
 			}
+retry:
 			FD_ZERO(&rw);
 			FD_SET(sockd, &rw);
 			selret = select(sockd + 1, NULL, &rw, NULL, &tv_timeout);
@@ -2208,6 +2237,8 @@ static bool setup_stratum_socket(struct pool *pool)
 					break;
 				}
 			}
+			if (selret < 0 && interrupted())
+				goto retry;
 			CLOSESOCKET(sockd);
 			applog(LOG_DEBUG, "Select timeout/failed connect");
 			continue;
@@ -2298,14 +2329,10 @@ out:
 
 void suspend_stratum(struct pool *pool)
 {
-	clear_sockbuf(pool);
 	applog(LOG_INFO, "Closing socket for stratum pool %d", pool->pool_no);
 
 	mutex_lock(&pool->stratum_lock);
-	pool->stratum_active = pool->stratum_notify = false;
-	if (pool->sock)
-		CLOSESOCKET(pool->sock);
-	pool->sock = 0;
+	__suspend_stratum(pool);
 	mutex_unlock(&pool->stratum_lock);
 }
 
@@ -2553,16 +2580,19 @@ void *str_text(char *ptr)
 
 void RenameThread(const char* name)
 {
+	char buf[16];
+
+	snprintf(buf, sizeof(buf), "cg@%s", name);
 #if defined(PR_SET_NAME)
 	// Only the first 15 characters are used (16 - NUL terminator)
-	prctl(PR_SET_NAME, name, 0, 0, 0);
+	prctl(PR_SET_NAME, buf, 0, 0, 0);
 #elif (defined(__FreeBSD__) || defined(__OpenBSD__))
-	pthread_set_name_np(pthread_self(), name);
+	pthread_set_name_np(pthread_self(), buf);
 #elif defined(MAC_OSX)
-	pthread_setname_np(name);
+	pthread_setname_np(buf);
 #else
-	// Prevent warnings for unused parameters...
-	(void)name;
+	// Prevent warnings
+	(void)buf;
 #endif
 }
 
@@ -2593,19 +2623,24 @@ void _cgsem_post(cgsem_t *cgsem, const char *file, const char *func, const int l
 	const char buf = 1;
 	int ret;
 
+retry:
 	ret = write(cgsem->pipefd[1], &buf, 1);
 	if (unlikely(ret == 0))
 		applog(LOG_WARNING, "Failed to write errno=%d" IN_FMT_FFL, errno, file, func, line);
+	else if (unlikely(ret < 0 && interrupted))
+		goto retry;
 }
 
 void _cgsem_wait(cgsem_t *cgsem, const char *file, const char *func, const int line)
 {
 	char buf;
 	int ret;
-
+retry:
 	ret = read(cgsem->pipefd[0], &buf, 1);
 	if (unlikely(ret == 0))
 		applog(LOG_WARNING, "Failed to read errno=%d" IN_FMT_FFL, errno, file, func, line);
+	else if (unlikely(ret < 0 && interrupted))
+		goto retry;
 }
 
 void cgsem_destroy(cgsem_t *cgsem)
@@ -2622,6 +2657,7 @@ int _cgsem_mswait(cgsem_t *cgsem, int ms, const char *file, const char *func, co
 	fd_set rd;
 	char buf;
 
+retry:
 	fd = cgsem->pipefd[0];
 	FD_ZERO(&rd);
 	FD_SET(fd, &rd);
@@ -2634,6 +2670,8 @@ int _cgsem_mswait(cgsem_t *cgsem, int ms, const char *file, const char *func, co
 	}
 	if (likely(!ret))
 		return ETIMEDOUT;
+	if (interrupted())
+		goto retry;
 	quitfrom(1, file, func, line, "Failed to sem_timedwait errno=%d cgsem=0x%p", errno, cgsem);
 	/* We don't reach here */
 	return 0;
@@ -2655,6 +2693,8 @@ void cgsem_reset(cgsem_t *cgsem)
 		ret = select(fd + 1, &rd, NULL, NULL, &timeout);
 		if (ret > 0)
 			ret = read(fd, &buf, 1);
+		else if (unlikely(ret < 0 && interrupted()))
+			ret = 1;
 	} while (ret > 0);
 }
 #else
@@ -2673,8 +2713,12 @@ void _cgsem_post(cgsem_t *cgsem, const char *file, const char *func, const int l
 
 void _cgsem_wait(cgsem_t *cgsem, const char *file, const char *func, const int line)
 {
-	if (unlikely(sem_wait(cgsem)))
+retry:
+	if (unlikely(sem_wait(cgsem))) {
+		if (interrupted())
+			goto retry;
 		quitfrom(1, file, func, line, "Failed to sem_wait errno=%d cgsem=0x%p", errno, cgsem);
+}
 }
 
 int _cgsem_mswait(cgsem_t *cgsem, int ms, const char *file, const char *func, const int line)
@@ -2686,12 +2730,15 @@ int _cgsem_mswait(cgsem_t *cgsem, int ms, const char *file, const char *func, co
 	cgtime(&tv_now);
 	timeval_to_spec(&ts_now, &tv_now);
 	ms_to_timespec(&abs_timeout, ms);
+retry:
 	timeraddspec(&abs_timeout, &ts_now);
 	ret = sem_timedwait(cgsem, &abs_timeout);
 
 	if (ret) {
 		if (likely(sock_timeout()))
 			return ETIMEDOUT;
+		if (interrupted())
+			goto retry;
 		quitfrom(1, file, func, line, "Failed to sem_timedwait errno=%d cgsem=0x%p", errno, cgsem);
 	}
 	return 0;
@@ -2703,6 +2750,8 @@ void cgsem_reset(cgsem_t *cgsem)
 
 	do {
 		ret = sem_trywait(cgsem);
+		if (unlikely(ret < 0 && interrupted()))
+			ret = 0;
 	} while (!ret);
 }
 
@@ -2754,4 +2803,197 @@ bool cg_completion_timeout(void *fn, void *fnarg, int timeout)
 	} else
 		pthread_cancel(pthread);
 	return !ret;
+}
+
+int cg_timeval_subtract(struct timeval* result, struct timeval* x, struct timeval* y)
+{
+	int nsec = 0;
+	if(x->tv_sec > y->tv_sec)
+		return -1;
+
+	if((x->tv_sec == y->tv_sec) && (x->tv_usec > y->tv_usec))
+		return -1;
+
+	result->tv_sec = (y->tv_sec - x->tv_sec);
+	result->tv_usec = (y->tv_usec - x->tv_usec);
+
+	if(result->tv_usec < 0)
+	{
+		result->tv_sec--;
+		result->tv_usec += 1000000;
+	}
+	return 0;
+}
+
+void rev(unsigned char *s, size_t l)
+{
+	size_t i, j;
+	unsigned char t;
+
+	for (i = 0, j = l - 1; i < j; i++, j--) {
+		t = s[i];
+		s[i] = s[j];
+		s[j] = t;
+	}
+}
+
+int check_asicnum(int asic_num, unsigned char nonce)
+{
+	switch(asic_num)
+	{
+	case 1:
+		return 1;
+	case 2:
+		switch(nonce & 0x80)
+		{
+		case 0x80: return 2;
+		default: return 1;
+		}
+	case 4:
+		switch(nonce & 0xC0)
+		{
+		case 0xC0: return 4;
+		case 0x80: return 3;
+		case 0x40: return 2;
+		default: return 1;
+		}
+	case 8:
+		switch(nonce & 0xE0)
+		{
+		case 0xE0: return 8;
+		case 0xC0: return 7;
+		case 0xA0: return 6;
+		case 0x80: return 5;
+		case 0x60: return 4;
+		case 0x40: return 3;
+		case 0x20: return 2;
+		default : return 1;
+		}
+	case 16:
+		switch(nonce & 0xF0)
+		{
+		case 0xF0: return 16;
+		case 0xE0: return 15;
+		case 0xD0: return 14;
+		case 0xC0: return 13;
+		case 0xB0: return 12;
+		case 0xA0: return 11;
+		case 0x90: return 10;
+		case 0x80: return 9;
+		case 0x70: return 8;
+		case 0x60: return 7;
+		case 0x50: return 6;
+		case 0x40: return 5;
+		case 0x30: return 4;
+		case 0x20: return 3;
+		case 0x10: return 2;
+		default : return 1;
+		}
+	case 32:
+		switch(nonce & 0xF8)
+		{
+		case 0xF8: return 32;
+		case 0xF0: return 31;
+		case 0xE8: return 30;
+		case 0xE0: return 29;
+		case 0xD8: return 28;
+		case 0xD0: return 27;
+		case 0xC8: return 26;
+		case 0xC0: return 25;
+		case 0xB8: return 24;
+		case 0xB0: return 23;
+		case 0xA8: return 22;
+		case 0xA0: return 21;
+		case 0x98: return 20;
+		case 0x90: return 19;
+		case 0x88: return 18;
+		case 0x80: return 17;
+		case 0x78: return 16;
+		case 0x70: return 15;
+		case 0x68: return 14;
+		case 0x60: return 13;
+		case 0x58: return 12;
+		case 0x50: return 11;
+		case 0x48: return 10;
+		case 0x40: return 9;
+		case 0x38: return 8;
+		case 0x30: return 7;
+		case 0x28: return 6;
+		case 0x20: return 5;
+		case 0x18: return 4;
+		case 0x10: return 3;
+		case 0x08: return 2;
+		default : return 1;
+		}
+	case 64:
+		switch(nonce & 0xFC)
+		{
+		case 0xFC: return 64;
+		case 0xF8: return 63;
+		case 0xF4: return 62;
+		case 0xF0: return 61;
+		case 0xEC: return 60;
+		case 0xE8: return 59;
+		case 0xE4: return 58;
+		case 0xE0: return 57;
+		case 0xDC: return 56;
+		case 0xD8: return 55;
+		case 0xD4: return 54;
+		case 0xD0: return 53;
+		case 0xCC: return 52;
+		case 0xC8: return 51;
+		case 0xC4: return 50;
+		case 0xC0: return 49;
+		case 0xBC: return 48;
+		case 0xB8: return 47;
+		case 0xB4: return 46;
+		case 0xB0: return 45;
+		case 0xAC: return 44;
+		case 0xA8: return 43;
+		case 0xA4: return 42;
+		case 0xA0: return 41;
+		case 0x9C: return 40;
+		case 0x98: return 39;
+		case 0x94: return 38;
+		case 0x90: return 37;
+		case 0x8C: return 36;
+		case 0x88: return 35;
+		case 0x84: return 34;
+		case 0x80: return 33;
+		case 0x7C: return 32;
+		case 0x78: return 31;
+		case 0x74: return 30;
+		case 0x70: return 29;
+		case 0x6C: return 28;
+		case 0x68: return 27;
+		case 0x64: return 26;
+		case 0x60: return 25;
+		case 0x5C: return 24;
+		case 0x58: return 23;
+		case 0x54: return 22;
+		case 0x50: return 21;
+		case 0x4C: return 20;
+		case 0x48: return 19;
+		case 0x44: return 18;
+		case 0x40: return 17;
+		case 0x3C: return 16;
+		case 0x38: return 15;
+		case 0x34: return 14;
+		case 0x30: return 13;
+		case 0x2C: return 12;
+		case 0x28: return 11;
+		case 0x24: return 10;
+		case 0x20: return 9;
+		case 0x1C: return 8;
+		case 0x18: return 7;
+		case 0x14: return 6;
+		case 0x10: return 5;
+		case 0x0C: return 4;
+		case 0x08: return 3;
+		case 0x04: return 2;
+		default : return 1;
+		}
+	default:
+		return 0;
+	}
 }
