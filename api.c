@@ -7,6 +7,7 @@
  * Software Foundation; either version 3 of the License, or (at your option)
  * any later version.  See COPYING for more details.
  */
+
 #define _MEMORY_DEBUG_MASTER 1
 
 #include "config.h"
