@@ -113,6 +113,7 @@ CGMiner specific configuration options:
   --enable-bitmain        Compile support for BitMain Multi Chain(default disabled)
   --enable-knc            Compile support for KnC miners (default disabled)
   --enable-bab            Compile support for BlackArrow Bitfury (default disabled)
+  --enable-minion         Compile support for BlackArrow Minion ASIC (default disabled)
   --enable-klondike       Compile support for Klondike (default disabled)
   --enable-modminer       Compile support for ModMiner FPGAs(default disabled)
   --without-curses        Compile support for curses TUI (default enabled)
@@ -217,12 +218,14 @@ ASIC only options:
 --avalon-fan <arg> Set fanspeed percentage for avalon, single value or range (default: 20-100)
 --avalon-freq <arg> Set frequency range for avalon-auto, single value or range
 --avalon-cutoff <arg> Set avalon overheat cut off temperature (default: 60)
---avalon-options <arg> Set avalon options baud:miners:asic:timeout:freq
+--avalon-options <arg> Set avalon options baud:miners:asic:timeout:freq:tech
 --avalon-temp <arg> Set avalon target temperature (default: 50)
+--bab-options <arg> Set BaB options max:def:min:up:down:hz:delay:trf
 --bflsc-overheat <arg> Set overheat temperature where BFLSC devices throttle, 0 to disable (default: 90)
 --bitburner-fury-options <arg> Override avalon-options for BitBurner Fury boards baud:miners:asic:timeout:freq
 --bitburner-fury-voltage <arg> Set BitBurner Fury core voltage, in millivolts
 --bitburner-voltage <arg> Set BitBurner (Avalon) core voltage, in millivolts
+--drillbit-options <arg> Set drillbit options <int|ext>:clock[:clock_divider][:voltage]
 --klondike-options <arg> Set klondike options clock:temptarget
 
 See ASIC-README for more information regarding these.
@@ -237,8 +240,8 @@ See FGPA-README for more information regarding this.
 
 Cgminer should automatically find all of your Avalon ASIC, BFL ASIC, BitForce
 FPGAs, Icarus bitstream FPGAs, Klondike ASIC, ASICMINER usb block erupters,
-KnC ASICs, BaB ASICs, Hashfast ASICs, ModMiner FPGAs, BPMC/BGMC BF1 USB ASICs
-and Bi*fury USB ASICs.
+KnC ASICs, BaB ASICs, Hashfast ASICs, ModMiner FPGAs, BPMC/BGMC BF1 USB ASICs,
+Bi*fury USB ASICs, Nanofury USB ASICs and Antminer U1 USB ASICs.
 
 ---
 
@@ -299,13 +302,18 @@ modem and the driver needs to be unloaded for cgminer to work:
 sudo kextunload -b com.apple.driver.AppleUSBCDC
 sudo kextunload -b com.apple.driver.AppleUSBCDCACMData
 
+Some devices need superuser access to mine on them so cgminer may need to
+be started with sudo
+i.e.:
+sudo cgminer <insert commands here>
+
+
 
 ---
 
 Advanced USB options:
 
-The --usb option can restrict how many Avalon, BFL ASIC, BitForce FPGAs,
-Klondike ASIC, ModMiner FPGAs or Icarus bitstream FPGAs it finds:
+The --usb option can restrict how many USB devices are found:
 
   --usb 1:2,1:3,1:4,1:*
 or
@@ -337,11 +345,13 @@ If you wish to see all USB devices, include the --usb-list-all option
 The second version
   --usb BAS:1,BFL:1,MMQ:0,ICA:0,KLN:0
 allows you to specify how many devices to choose based on each device
-driver cgminer has - there are currently 5 USB drivers: BAS, BFL, MMQ.
-ICA & KLN
+driver cgminer has - the current USB drivers are:
+AVA, BAS, BFL, BF1, DRB, HFA, ICA, KLN and MMQ.
+
 N.B. you can only specify which device driver to limit, not the type of
 each device, e.g. with BAS:n you can limit how many BFL ASIC devices will
 be checked, but you cannot limit the number of each type of BFL ASIC
+
 Also note that the MMQ count is the number of MMQ backplanes you have
 not the number of MMQ FPGAs
 
@@ -593,7 +603,7 @@ format:
 For example (this is wrapped, but it's all on one line for real):
     1335313090,reject,
     ffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000,
-    http://localhost:8337,GPU0,0,
+    http://localhost:8337,ASC0,0,
     6f983c918f3299b58febf95ec4d0c7094ed634bc13754553ec34fc3800000000,
     00000001a0980aff4ce4a96d53f4b89a2d5f0e765c978640fe24372a000001c5
     000000004a4366808f81d44f26df3d69d7dc4b3473385930462d9ab707b50498
@@ -627,7 +637,7 @@ config file and the file will be loaded one each startup.
 
 Q: The build fails with gcc is unable to build a binary.
 A: Remove the "-march=native" component of your CFLAGS as your version of gcc
-does not support it.
+does not support it. Also -O2 is capital o 2, not zero 2.
 
 Q: Can you implement feature X?
 A: I can, but time is limited, and people who donate are more likely to get
@@ -654,7 +664,9 @@ less of another, or can you change the quiet mode or can you add yet another
 output mode?
 A: Everyone will always have their own view of what's important to monitor.
 The defaults are very sane and I have very little interest in changing this
-any further.
+any further. There is far more detail in the API output than can be reasonably
+displayed on the small console window, and using an external interface such
+as miner.php is much more useful for setups with many devices.
 
 Q: What are the best parameters to pass for X pool/hardware/device.
 A: Virtually always, the DEFAULT parameters give the best results. Most user
@@ -705,9 +717,6 @@ been skipped.
 Q: What is an ASIC?
 A: They are Application Specify Integrated Circuit devices and provide the
 highest performance per unit power due to being dedicated to only one purpose.
-
-Q: Can I mine scrypt with FPGAs or ASICs?
-A: No.
 
 Q: What is stratum and how do I use it?
 A: Stratum is a protocol designed for pooled mining in such a way as to

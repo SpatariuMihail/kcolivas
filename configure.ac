@@ -1,8 +1,8 @@
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 m4_define([v_maj], [3])
-m4_define([v_min], [8])
-m4_define([v_mic], [5])
+m4_define([v_min], [12])
+m4_define([v_mic], [0])
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 m4_define([v_ver], [v_maj.v_min.v_mic])
 m4_define([lt_rev], m4_eval(v_maj + v_min))
@@ -188,9 +188,20 @@ AC_ARG_ENABLE([bitfury],
 	[bitfury=$enableval]
 	)
 if test "x$bitfury" = xyes; then
-	AC_DEFINE([USE_BITFURY], [1], [Defined to 1 if BitFury support is wanted])
+	AC_DEFINE([USE_BITFURY], [1], [Defined to 1 if BitFury ASIC support is wanted])
 fi
 AM_CONDITIONAL([HAS_BITFURY], [test x$bitfury = xyes])
+
+drillbit="no"
+
+AC_ARG_ENABLE([drillbit],
+	[AC_HELP_STRING([--enable-drillbit],[Compile support for Drillbit BitFury ASICs (default disabled)])],
+	[drillbit=$enableval]
+	)
+if test "x$drillbit" = xyes; then
+	AC_DEFINE([USE_DRILLBIT], [1], [Defined to 1 if Drillbit BitFury support is wanted])
+fi
+AM_CONDITIONAL([HAS_DRILLBIT], [test x$drillbit = xyes])
 
 hashfast="no"
 
@@ -247,6 +258,17 @@ if test "x$knc" = xyes; then
 fi
 AM_CONDITIONAL([HAS_KNC], [test x$knc = xyes])
 
+minion="no"
+
+AC_ARG_ENABLE([minion],
+	[AC_HELP_STRING([--enable-minion],[Compile support for Minion BlackArrow ASIC (default disabled)])],
+	[minion=$enableval]
+	)
+if test "x$minion" = xyes; then
+	AC_DEFINE([USE_MINION], [1], [Defined to 1 if Minion BlackArrow ASIC support is wanted])
+fi
+AM_CONDITIONAL([HAS_MINION], [test x$minion = xyes])
+
 modminer="no"
 
 AC_ARG_ENABLE([modminer],
@@ -282,14 +304,21 @@ else
 	])
 fi
 
-if test x$avalon$bitmain$bitforce$bitfury$modminer$bflsc$icarus$bmsc$hashfast$klondike != xnononononononono; then
+if test x$avalon$bitmain$bitforce$bitfury$modminer$bflsc$icarus$bmsc$hashfast$klondike$drillbit != xnonononononononononono; then
 	want_usbutils=true
 else
 	want_usbutils=false
 fi
 
+if test x$bitfury != xno; then
+	want_libbitfury=true
+else
+	want_libbitfury=false
+fi
+
 AM_CONDITIONAL([NEED_FPGAUTILS], [test x$modminer != xno])
 AM_CONDITIONAL([WANT_USBUTILS], [test x$want_usbutils != xfalse])
+AM_CONDITIONAL([WANT_LIBBITFURY], [test x$want_libbitfury != xfalse])
 AM_CONDITIONAL([HAVE_CURSES], [test x$curses = xyes])
 AM_CONDITIONAL([HAVE_WINDOWS], [test x$have_win32 = xtrue])
 AM_CONDITIONAL([HAVE_x86_64], [test x$have_x86_64 = xtrue])
@@ -467,6 +496,12 @@ else
 	echo "  Bitmain.MultiChain...: Disabled"
 fi
 
+if test "x$minion" = xyes; then
+	echo "  BlackArrowMinion.ASIC: Enabled"
+else
+	echo "  BlackArrowMinion.ASIC: Disabled"
+fi
+
 if test "x$bab" = xyes; then
 	echo "  BlackArrow.ASICs.....: Enabled"
 else
@@ -489,6 +524,12 @@ if test "x$bitfury" = xyes; then
 	echo "  BitFury.ASICs........: Enabled"
 else
 	echo "  BitFury.ASICs........: Disabled"
+fi
+
+if test "x$drillbit" = xyes; then
+	echo "  Drillbit.BitFury.....: Enabled"
+else
+	echo "  Drillbit.BitFury.....: Disabled"
 fi
 
 if test "x$hashfast" = xyes; then
@@ -527,7 +568,7 @@ else
 	echo "  ModMiner.FPGAs.......: Disabled"
 fi
 
-if test "x$avalon$bitmain$bab$bflsc$bitforce$bitfury$hashfast$icarus$bmsc$klondike$knc$modminer" = xnononononononononono; then
+if test "x$avalon$bitmain$bab$bflsc$bitforce$bitfury$hashfast$icarus$bmsc$klondike$knc$modminer$drillbit$minion" = xnononononononononononononono; then
 	AC_MSG_ERROR([No mining configured in])
 fi
 
