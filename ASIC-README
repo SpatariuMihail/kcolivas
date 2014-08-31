@@ -1,10 +1,28 @@
 SUPPORTED DEVICES
 
-Currently supported devices include the Avalon (including BitBurner and
-Klondike), the Butterfly Labs SC range of devices, the ASICMINER block
-erupters, the BF1 (bitfury) USB (red and blue) devices, KnCminer Mercury,
-Saturn and Jupiter devices, BlackArrow Bitfury devices, Bi*fury USB devices,
-Nanofury USB devices, Hashfast devices and Antminer U1 USB devices.
+Currently supported devices include:
+- Antminer U1/U2/U2+ USB
+- Antminer S1
+- ASICMINER block erupters
+- Avalon (including BitBurner and Klondike)
+- Avalon2/3
+- BFx2 USB
+- Butterfly Labs SC range
+- BF1 (bitfury) USB (red and blue)
+- BlackArrow Bitfury
+- BlackArrow Minion
+- Bi*fury USB
+- Cointerra
+- Hashfast Babyjet and Sierra
+- Hashratio
+- Hexfury USB
+- KnCminer Mercury, Saturn and Jupiter
+- Nanofury USB
+- Other bitfury USB devices
+- Onestring miner USB
+- Rockminer R-Box
+- Spondoolies SP10, SP30
+
 
 No COM ports on windows or TTY devices will be used by cgminer as it
 communicates directly with them via USB so it is normal for them to not exist or
@@ -22,6 +40,10 @@ BFL devices need the --enable-bflsc option when compiling cgminer yourself.
 Avalon will come up as AVA.
 
 Avalon devices need the --enable-avalon option when compiling cgminer.
+
+Avalon2/3 will come up as AV2.
+
+Avalon2/3 devices need the --enable-avalon2 option when compiling cgminer.
 
 Klondike will come up as KLN.
 
@@ -43,15 +65,33 @@ The current BlackArrow Bitfury devices are similar to the Bitfury GPIO mining
 boards, with both V1 and V2 controllers, and come up as BaB.
 
 
+BlackArrow Minion devices
+
+BlackArrow Minion devices need the --enable-minion option when compiling
+cgminer.
+
+BlackArrow Minion devices are SPI/GPIO mining devices and come up as MBA
+
+
 BITFURY devices
 
 Bitfury devices need the --enable-bitfury option when compiling cgminer.
 
 Currently the BPMC/BGMC BF1 devices AKA redfury/bluefury are supported and
 come up as BF1, along with the Bi*fury USB devices which come up as BXF.
-Nanofury devices come up as NF1.
+Nanofury devices come up as NF1. BFx2 devices come up as BXM.
 
 Bitfury USB devices are also set up as per the USB ASICs below.
+
+
+COINTERRA devices
+
+Cointerra devices need the --enable-cointerra option when compiling cgminer.
+
+Cointerra devices come up as CTA devices and currently take only hidden command
+line arguments for power settings.
+
+Cointerra USB devices are set up as per the USB ASIC instructions below.
 
 
 HASHFAST devices
@@ -64,16 +104,40 @@ they are and give them the following names:
 
 HFB: Hashfast Babyjet
 HFS: Hashfast Sierra
-HFA: Hashfast non standard (eg. a Babyjet with an added board)
+HFA: Hashfast non standard (eg. a Babyjet with an added board, Habanero)
 
 
-ANTMINER devices
+HASHRATIO devices
+
+Hashratio devices need the --enable-hashratio option when compiling cgminer.
+
+
+ANTMINER U1/U2+ devices
 
 Antminer devices need the --enable-icarus option when compiling cgminer.
 
 Currently the U1 USB sticks are supported and come up as ANU devices. They
 are also set up as per the USB ASICs below. They need no options to work well
 but will accept all the icarus options.
+
+
+ANTMINER S1 devices
+
+Antminer S1 devices need the --enable-ants1 option when compiling cgminer.
+
+They are custom OpenWRT linux devices
+
+They are recognised with the name ANT
+
+
+BITMINE A1 devices
+
+Bitmine A1 devices need the --enable-bitmine_A1 compile option set.
+
+
+Rockminer R-Box
+
+Rockminer R-Box devices need the --enable-icarus compile option set.
 
 ---
 GETTING STARTED WITH USB ASICS
@@ -136,29 +200,110 @@ On OSX, like Linux, no drivers need to be installed. However some devices
 like the bitfury USB sticks automatically load a driver thinking they're a
 modem and the driver needs to be unloaded for cgminer to work:
 
-sudo kextunload -b com.apple.driver.AppleUSBCDC
-sudo kextunload -b com.apple.driver.AppleUSBCDCACMData
+ sudo kextunload -b com.apple.driver.AppleUSBCDC
+ sudo kextunload -b com.apple.driver.AppleUSBCDCACMData
+
+There may be a limit to the number of USB devices that you are allowed to start.
+The following set of commands, followed by a reboot will increase that:
+
+ sudo su
+ touch /etc/sysctl.conf
+ echo kern.sysv.semume=100 >> /etc/sysctl.conf
+ chown root:wheel /etc/sysctl.conf
+ chmod 0644 /etc/sysctl.conf
+
+Some devices need superuser access to mine on them so cgminer may need to
+be started with sudo
+i.e.:
+ sudo cgminer <insert commands here>
 
 
 ---
 
 ASIC SPECIFIC COMMANDS
 
+--anu-freq <arg>    Set AntminerU1 frequency in MHz, range 150-500 (default: 200)
 --avalon-auto       Adjust avalon overclock frequency dynamically for best hashrate
 --avalon-cutoff <arg> Set avalon overheat cut off temperature (default: 60)
 --avalon-fan <arg> Set fanspeed percentage for avalon, single value or range (default: 20-100)
 --avalon-freq <arg> Set frequency range for avalon-auto, single value or range
 --avalon-options <arg> Set avalon options baud:miners:asic:timeout:freq:tech
 --avalon-temp <arg> Set avalon target temperature (default: 50)
+--avalon2-freq      Set frequency range for Avalon2, single value or range
+--avalon2-voltage   Set Avalon2 core voltage, in millivolts
+--avalon2-fan       Set Avalon2 target fan speed
+--avalon2-cutoff <arg> Set Avalon2 overheat cut off temperature (default: 88)
+--avalon2-fixed-speed Set Avalon2 fan to fixed speed
 --bab-options <arg> Set BaB options max:def:min:up:down:hz:delay:trf
 --bflsc-overheat <arg> Set overheat temperature where BFLSC devices throttle, 0 to disable (default: 90)
 --bitburner-fury-options <arg> Override avalon-options for BitBurner Fury boards baud:miners:asic:timeout:freq
 --bitburner-fury-voltage <arg> Set BitBurner Fury core voltage, in millivolts
 --bitburner-voltage <arg> Set BitBurner (Avalon) core voltage, in millivolts
---bxf-temp-target <arg> Set target temperature for BXF devices (default: 82)
+--bitmain-auto      Adjust bitmain overclock frequency dynamically for best hashrate
+--bitmain-cutoff    Set bitmain overheat cut off temperature
+--bitmain-fan       Set fanspeed percentage for bitmain, single value or range (default: 20-100)
+--bitmain-freq      Set frequency range for bitmain-auto, single value or range
+--bitmain-hwerror   Set bitmain device detect hardware error
+--bitmain-options   Set bitmain options baud:miners:asic:timeout:freq
+--bitmain-temp      Set bitmain target temperature
+--bxf-bits <arg>    Set max BXF/HXF bits for overclocking (default: 54)
+--bxf-temp-target <arg> Set target temperature for BXF/HXF devices (default: 82)
+--bxm-bits <arg>    Set BXM bits for overclocking (default: 54)
 --hfa-hash-clock <arg> Set hashfast clock speed (default: 550)
---hfa-temp-overheat <arg> Set the hashfast overheat throttling temperature (default: 85)
+--hfa-fail-drop <arg> Set how many MHz to drop clockspeed each failure on an overlocked hashfast device (default: 10)
+--hfa-fan <arg>     Set fanspeed percentage for hashfast, single value or range (default: 10-85)
+--hfa-name <arg>    Set a unique name for a single hashfast device specified with --usb or the first device found
+--hfa-noshed        Disable hashfast dynamic core disabling feature
+--hfa-options <arg> Set hashfast options name:clock (comma separated)
+--hfa-temp-overheat <arg> Set the hashfast overheat throttling temperature (default: 95)
+--hfa-temp-target <arg> Set the hashfast target temperature (0 to disable) (default: 88)
+--hro-freq          Set the hashratio clock frequency (default: 280)
 --klondike-options <arg> Set klondike options clock:temptarget
+--minion-chipreport <arg> Seconds to report chip 5min hashrate, range 0-100 (default: 0=disabled)
+--minion-freq <arg> Set minion chip frequencies in MHz, single value or comma list, range 100-1400 (default: 1200)
+--minion-freqchange Millisecond total time to do frequency changes (default: 1000)
+--minion-freqpercent Percentage to use when starting up a chip (default: 70%)
+--minion-idlecount  Report when IdleCount is >0 or changes
+--minion-ledcount   Turn off led when more than this many chips below the ledlimit (default: 0)
+--minion-ledlimit   Turn off led when chips GHs are below this (default: 90)
+--minion-idlecount  Report when IdleCount is >0 or changes
+--minion-noautofreq Disable automatic frequency adjustment
+--minion-overheat   Enable directly halting any chip when the status exceeds 100C
+--minion-spidelay   Add a delay in microseconds after each SPI I/O
+--minion-spireset   SPI regular reset: iNNN for I/O count or sNNN for seconds - 0 means none
+--minion-spisleep   Sleep time in milliseconds when doing an SPI reset
+--minion-temp <arg> Set minion chip temperature threshold, single value or comma list, range 120-160 (default: 135C)
+--nfu-bits <arg>    Set nanofury bits for overclocking, range 32-63 (default: 50)
+--rock-freq <arg>   Set RockMiner frequency in MHz, range 125-500 (default: 270)
+
+
+ANTMINER S1 DEVICES
+
+--bitmain-auto      Adjust bitmain overclock frequency dynamically for best hashrate
+--bitmain-cutoff    Set bitmain overheat cut off temperature
+--bitmain-fan       Set fanspeed percentage for bitmain, single value or range (default: 20-100)
+--bitmain-freq      Set frequency range for bitmain-auto, single value or range
+--bitmain-hwerror   Set bitmain device detect hardware error
+--bitmain-options   Set bitmain options baud:miners:asic:timeout:freq
+--bitmain-temp      Set bitmain target temperature
+
+The Antminer S1 device comes with it's own operating system and a preinstalled
+version of cgminer as part of the flash firmware. No configuration should be
+necessary.
+
+
+ANTMINER U1 DEVICES
+
+--anu-freq <arg>    Set AntminerU1 frequency in MHz, range 150-500 (default: 200)
+
+By default, Antminer U1 devices run at a clockspeed of 200. This command allows
+you to specify a chosen frequency to attempt to run all ANU devices at. Cgminer
+will try to find the nearest frequency the device supports and will report if
+the frequency is not exactly as requested. Note that cgminer reports hashrate
+ONLY FROM VALID HASHES so if you increase the frequency but your hashrate does
+not increase or it decreases and hardware errors start showing up, you have
+overclocked it too much. In the worst case scenario it will fail to start at too
+high a speed. Most will run happily up to 250.
 
 
 AVALON AND BITBURNER DEVICES
@@ -337,6 +482,15 @@ ambient temp / highest device temp  lowest detected ASIC cooling fan RPM.
 Use the API for more detailed information than this.
 
 
+Avalon2 Devices
+
+--avalon2-freq      Set frequency range for Avalon2, single value or range
+--avalon2-voltage   Set Avalon2 core voltage, in millivolts
+--avalon2-fan       Set Avalon2 target fan speed
+--avalon2-cutoff <arg> Set Avalon2 overheat cut off temperature (default: 88)
+--avalon2-fixed-speed Set Avalon2 fan to fixed speed
+
+
 BFLSC Devices
 
 --bflsc-overheat <arg> Set overheat temperature where BFLSC devices throttle, 0 to disable (default: 90)
@@ -347,12 +501,23 @@ throttles BFLSC devices by allowing them to temporarily go idle.
 
 BITFURY Devices
 
---bxf-temp-target <arg> Set target temperature for BXF devices (default: 82)
+--bxf-bits <arg>    Set max BXF/HXF bits for overclocking (default: 54)
+
+In combination with the dynamic clocking on Bi*fury devices, this sets the
+highest bit target that cgminer will aim for.
+
+
+--bxf-temp-target <arg> Set target temperature for BXF/HXF devices (default: 82)
 
 Cgminer uses dynamic clocking on Bi*fury devices to try and maintain the
 temperature just below an optimal target. This option allows you to change the
 target temperature. When actively cooled below this, the devices will run at
 maximum speed.
+
+--bxm-bits <arg>    Set BXM bits for overclocking (default: 54)
+
+Choose the overclocking  bits for BFx2 devices.
+
 
 --nfu-bits <arg>    Set nanofury bits for overclocking range 32-63 (default: 50)
 
@@ -361,17 +526,45 @@ is still within USB2 spec. This value allows you to alter the clockspeed, with
 ~54 being the optimal but requiring a higher power or USB3 port.
 
 
-BITFURY Devices
+Cointerra Devices
+
+--cta-load <arg> (0 - 255)
+--ps-load <arg> (0 - 100)
+
+These are undocumented.
+
+
+Drillbit Systems Devices
 
 --drillbit-options <arg> Set drillbit options <int|ext>:clock[:clock_divider][:voltage]
 
-int/ext defines the clock source - default int
-clock_divider must be 1 or 2 with a default of 1
-int allows a clock of 0 to 63 with recommended 48-58 for div 2 and 30-48 for div 1
- with a default of 40 with div 1
-ext recommends a clock of 80 to 230, with a default of 200
+* int/ext defines the clock source - default int. Not all boards support ext.
+* clock_divider must be 1 or 2 with a default of 1. Bitfury only,
+  ignored on Avalon.
+* clock is in MHz, on Drillbit range 80-250 with a default of 200,
+  recommended maximum 230. On Avalon range 500-1000 with a
+  recommended maximum of 800.
+* voltage is ASIC core voltage in millivolts, available values vary per board but
+  default is 850 and the recommended maximum is 950 (Bitfury) and 1000 (Avalon.)
 
-voltage must be one of 650, 750, 850 or 950 with a default of 850
+--drillbit-auto <every>:[<gooderr>:<baderr>:<maxerr>]
+
+If supported by firmware and device, this feature allows cgminer to
+automatically tweak each ASIC's clock rate up and down in to achieve
+optimal performance.
+
+* every - only required param, check each ASIC after each block of
+  this many work units. Recommended value 100.
+* gooderr - the "Good" threshold is when less hardware errors than
+  this per "every" work units, the clock rate will be increased.
+  Default value 1.
+* baderr - the "Bad" threshold is when more hardware errors than
+  this per "every" work units, the clock rate will be decreased.
+  Default value 3.
+* maxerr - the "Max" threshold is when more hardware errors than
+  this per "every" work units (including pre-empting before
+  "every" work units is up), the clock rate will be decreased and
+  will not be increased again past this point. Default value 10.
 
 
 BlackArrow Bitfury devices
@@ -406,15 +599,100 @@ Note that if instability is detected by cgminer and the device has to undergo
 a reset, cgminer will lower the clockspeed on resetting it each time till the
 value returns to the default of 550.
 
---hfa-temp-overheat <arg> Set the hashfast overheat throttling temperature (default: 85)
+--hfa-fail-drop <arg> Set how many MHz to drop clockspeed each failure on an overlocked hashfast device (default: 10)
+
+If you overclock your hashfast device with --hfa-hash-clock and cgminer detects
+it failing to return hashes, it will restart it at a lower clock speed if
+possible. Changing this value will allow you to choose how much it will lower
+the clock speed or to disable this function entirely.
+
+--hfa-fan <arg>     Set fanspeed percentage for hashfast, single value or range (default: 10-85)
+
+This changes the range of fanspeeds used on hashfast devices with firmware that
+supports it. Note that the fanspeed will dynamically change to try and maintain
+a target temperature with --hfa-temp-target but if the target temperature is
+disabled, the fanspeed will remain static.
+eg:
+--hfa-fan 25-100
+
+--hfa-temp-overheat <arg> Set the hashfast overheat throttling temperature (default: 95)
 
 Cgminer will temporarily stop sending hashfast devices work once this
 temperature is reached. Note that with the water cooling in these devices,
 temperature recovery is likely to be very quick and the device will start
 hashing again after only a very brief period.
 
+--hfa-temp-target <arg> Set the hashfast target temperature (0 to disable) (default: 88)
+
+On hashfast devices with firmware that supports dynamic fanspeed and die speeds,
+cgminer will try to maintain temperature according to this target by adjusting
+fanspeed and then if need be, throttle speeds on a die-by-die basis. Disabling
+this feature will leave a constant fanspeed and die speed but will not disable
+the temp-overheat feature.
+
+--hfa-name <arg>    Set a unique name for a single hashfast device specified with --usb or the first device found
+
+This command allows you to specify the unique name stored in nvram on a single
+hashfast device. This name can be queried from the API stats command and comes
+up as "op name". Discrete names are used by cgminer to try to maintain settings
+across restarts, unplugs/hotplugs and so on. If this command is used by itself,
+the name will be given to the first hashfast device it encounters and then
+cgminer will proceed to go back to regular mining. If you have multiple devices,
+it is best to discretely choose the device you wish to use with the --usb
+command. For example
+'lsusb' on linux shows the following devices (297c:0001 is a hfa device):
+ Bus 001 Device 079: ID 297c:0001
+ Bus 004 Device 042: ID 297c:0001
+If you wished to name the second device Slug you would add the commands:
+ --hfa-name Slug --usb 4:42
+
+--hfa-noshed        Disable hashfast dynamic core disabling feature
+
+Newer firmwares on hashfast devices dynamically disable cores that generate
+invalid data. This command will disable this feature where possible.
+
+--hfa-options <arg> Set hashfast options name:clock (comma separated)
+
+This command allows you to set options for each discrete hashfast device by
+its name (if the firmware has naming support, i.e. version 0.3+). Currently
+this takes only one option, the clock speed, although future options may be
+added.
+e.g.:
+--hfa-options "rabbit:650,turtle:550"
+
+Would set a device named rabbit to clock speed 650 and the one named turtle to
+550. Starting the device at a speed where it is most stable will give more
+reliable hashrates long term and prevent it interacting with other devices,
+rather than depending on the clockdown feature in cgminer.
+
+
 Other undocumented hashfast command line options are for development purposes
 only at this stage and serve no useful purpose to end users.
+
+
+Hashratio Devices
+
+--hro-freq          Set the hashratio clock frequency (default: 280)
+
+
+Bitmine A1 Devices
+
+--bitmine-a1-options <ref_clk>:<sys_clk>:<spi_clk>:<max_chip>
+ref_clk:  reference clock in kHz                      (default: 16000)
+sys_clk:  target system clock in kHz to be set in PLL (default: 250000)
+spi_clk:  SPI clock in kHz                            (default: 800)
+max_chip: [debug/testing] limit chip chain
+
+Set 0 for fields you want to keep untouched to default, e.g.
+--bitmine-a1-options 0:0:400
+to only set SPI clock to 400kHz
+
+
+Rockminer R-Box Devices
+
+--rock-freq <arg>   Set RockMiner frequency in MHz, range 125-500 (default: 270)
+
+Note that only a limited range is likely to be accepted (usually 200-290)
 
 ---
 

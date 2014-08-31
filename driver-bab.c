@@ -268,6 +268,7 @@ typedef struct witem {
 	struct work *work;
 	struct bab_work_send chip_input;
 	bool ci_setup;
+	bool rolled;
 	int nonces;
 	struct timeval work_start;
 } WITEM;
@@ -323,11 +324,12 @@ static double chip_speed_ranges[BAB_CHIP_SPEEDS - 1] =
 	{ 0.0, 0.8, 1.6, 2.2, 2.8 };
 // Greater than the last one above means it's the last speed
 static char *chip_speed_names[BAB_CHIP_SPEEDS] =
-	{ "Dead", "V.Slow", "Slow", "OK", "Good", "Fast" };
+	{ "Bad", "V.Slow", "Slow", "OK", "Good", "Fast" };
 
 /*
  * This is required to do chip tuning
  * If disabled, it will simply run the chips at default speed
+ * unless they never return valid results
  */
 #define UPDATE_HISTORY 1
 
@@ -359,6 +361,9 @@ struct bab_info {
 	cgsem_t spi_work;
 	cgsem_t spi_reply;
 	cgsem_t process_reply;
+
+	bool disabled[BAB_MAXCHIPS];
+	int total_disabled;
 
 	struct bab_work_reply chip_results[BAB_MAXCHIPS];
 	struct bab_work_reply chip_prev[BAB_MAXCHIPS];
@@ -453,13 +458,16 @@ struct bab_info {
 	K_LIST *nfree_list;
 	K_STORE *good_nonces[BAB_MAXCHIPS];
 	K_STORE *bad_nonces[BAB_MAXCHIPS];
-#if UPDATE_HISTORY
+
 	struct timeval first_work[BAB_MAXCHIPS];
+#if UPDATE_HISTORY
 	uint32_t work_count[BAB_MAXCHIPS];
 	struct timeval last_tune[BAB_MAXCHIPS];
 	uint8_t bad_fast[BAB_MAXCHIPS];
-	bool dead_msg[BAB_MAXCHIPS];
+	bool bad_msg[BAB_MAXCHIPS];
 #endif
+	uint64_t work_unrolled;
+	uint64_t work_rolled;
 
 	// bab-options (in order)
 	uint8_t max_speed;
@@ -522,6 +530,34 @@ struct bab_info {
 
 // Don't send work more often than this
 #define BAB_EXPECTED_WORK_DELAY_mS 899
+
+/*
+ * If a chip only has bad results after this time limit in seconds,
+ * then switch it down to min_speed
+ */
+#define BAB_BAD_TO_MIN (HISTORY_TIME_S + 10)
+
+/*
+ * Also, just to be sure it's actually mining, it must have got this
+ * many bad results before considering disabling it
+ */
+#define BAB_BAD_COUNT 100
+
+/*
+ * If a chip only has bad results after this time limit in seconds,
+ * then disable it
+ * A chip only returning bad results will use a lot more CPU than
+ * an ok chip since all results will be tested against all unexpired
+ * work that's been sent to the chip
+ */
+#define BAB_BAD_DEAD (BAB_BAD_TO_MIN * 2)
+
+/*
+ * Maximum bab_queue_full() will roll work if it is allowed to
+ * Since work can somtimes (rarely) queue up with many chips,
+ * limit it to avoid it getting too much range in the pending work
+ */
+#define BAB_MAX_ROLLTIME 42
 
 static void bab_ms3steps(uint32_t *p)
 {
@@ -606,7 +642,10 @@ static void cleanup_older(struct cgpu_info *babcgpu, int chip, K_ITEM *witem)
 
 		k_unlink_item(babinfo->chip_work[chip], tail);
 		K_WUNLOCK(babinfo->chip_work[chip]);
-		work_completed(babcgpu, DATAW(tail)->work);
+		if (DATAW(tail)->rolled)
+			free_work(DATAW(tail)->work);
+		else
+			work_completed(babcgpu, DATAW(tail)->work);
 		K_WLOCK(babinfo->chip_work[chip]);
 		k_add_head(babinfo->wfree_list, tail);
 		tail = babinfo->chip_work[chip]->tail;
@@ -617,7 +656,10 @@ static void cleanup_older(struct cgpu_info *babcgpu, int chip, K_ITEM *witem)
 		while (tail && tail != witem) {
 			k_unlink_item(babinfo->chip_work[chip], tail);
 			K_WUNLOCK(babinfo->chip_work[chip]);
-			work_completed(babcgpu, DATAW(tail)->work);
+			if (DATAW(tail)->rolled)
+				free_work(DATAW(tail)->work);
+			else
+				work_completed(babcgpu, DATAW(tail)->work);
 			K_WLOCK(babinfo->chip_work[chip]);
 			k_add_head(babinfo->wfree_list, tail);
 			tail = babinfo->chip_work[chip]->tail;
@@ -911,65 +953,66 @@ static void bab_put(struct bab_info *babinfo, K_ITEM *sitem)
 			bank = babinfo->chip_bank[i];
 			BAB_ADD_BREAK(sitem);
 		}
-		if (BAB_CFGD_SET(babinfo->chip_conf[i]) || !babinfo->chip_conf[i]) {
-			bab_set_osc(babinfo, i);
-			bab_add_data(sitem, BAB_OSC_ADDR, babinfo->osc, sizeof(babinfo->osc));
-			bab_config_reg(sitem, BAB_ICLK_REG, BAB_ICLK_BIT(babinfo->chip_conf[i]));
-			bab_config_reg(sitem, BAB_FAST_REG, BAB_FAST_BIT(babinfo->chip_conf[i]));
-			bab_config_reg(sitem, BAB_DIV2_REG, BAB_DIV2_BIT(babinfo->chip_conf[i]));
-			bab_config_reg(sitem, BAB_SLOW_REG, BAB_SLOW_BIT(babinfo->chip_conf[i]));
-			bab_config_reg(sitem, BAB_OCLK_REG, BAB_OCLK_BIT(babinfo->chip_conf[i]));
-			for (reg = BAB_REG_CLR_FROM; reg <= BAB_REG_CLR_TO; reg++)
-				bab_config_reg(sitem, reg, false);
-			if (babinfo->chip_conf[i]) {
-				bab_add_data(sitem, BAB_COUNT_ADDR, bab_counters, sizeof(bab_counters));
-				bab_add_data(sitem, BAB_W1A_ADDR, bab_w1, sizeof(bab_w1));
-				bab_add_data(sitem, BAB_W1B_ADDR, bab_w1, sizeof(bab_w1)/2);
-				bab_add_data(sitem, BAB_W2_ADDR, bab_w2, sizeof(bab_w2));
-				babinfo->chip_conf[i] ^= BAB_CFGD_VAL;
-			}
-			babinfo->old_fast[i] = babinfo->chip_fast[i];
-			babinfo->old_conf[i] = babinfo->chip_conf[i];
-		} else {
-			if (babinfo->old_fast[i] != babinfo->chip_fast[i]) {
+		if (!(babinfo->disabled[i])) {
+			if (BAB_CFGD_SET(babinfo->chip_conf[i]) || !babinfo->chip_conf[i]) {
 				bab_set_osc(babinfo, i);
 				bab_add_data(sitem, BAB_OSC_ADDR, babinfo->osc, sizeof(babinfo->osc));
+				bab_config_reg(sitem, BAB_ICLK_REG, BAB_ICLK_BIT(babinfo->chip_conf[i]));
+				bab_config_reg(sitem, BAB_FAST_REG, BAB_FAST_BIT(babinfo->chip_conf[i]));
+				bab_config_reg(sitem, BAB_DIV2_REG, BAB_DIV2_BIT(babinfo->chip_conf[i]));
+				bab_config_reg(sitem, BAB_SLOW_REG, BAB_SLOW_BIT(babinfo->chip_conf[i]));
+				bab_config_reg(sitem, BAB_OCLK_REG, BAB_OCLK_BIT(babinfo->chip_conf[i]));
+				for (reg = BAB_REG_CLR_FROM; reg <= BAB_REG_CLR_TO; reg++)
+					bab_config_reg(sitem, reg, false);
+				if (babinfo->chip_conf[i]) {
+					bab_add_data(sitem, BAB_COUNT_ADDR, bab_counters, sizeof(bab_counters));
+					bab_add_data(sitem, BAB_W1A_ADDR, bab_w1, sizeof(bab_w1));
+					bab_add_data(sitem, BAB_W1B_ADDR, bab_w1, sizeof(bab_w1)/2);
+					bab_add_data(sitem, BAB_W2_ADDR, bab_w2, sizeof(bab_w2));
+					babinfo->chip_conf[i] ^= BAB_CFGD_VAL;
+				}
 				babinfo->old_fast[i] = babinfo->chip_fast[i];
-			}
-			if (babinfo->old_conf[i] != babinfo->chip_conf[i]) {
-				if (BAB_ICLK_SET(babinfo->old_conf[i]) !=
-						 BAB_ICLK_SET(babinfo->chip_conf[i]))
-					bab_config_reg(sitem, BAB_ICLK_REG,
-							BAB_ICLK_BIT(babinfo->chip_conf[i]));
-				if (BAB_FAST_SET(babinfo->old_conf[i]) !=
-						 BAB_FAST_SET(babinfo->chip_conf[i]))
-					bab_config_reg(sitem, BAB_FAST_REG,
-							BAB_FAST_BIT(babinfo->chip_conf[i]));
-				if (BAB_DIV2_SET(babinfo->old_conf[i]) !=
-						 BAB_DIV2_SET(babinfo->chip_conf[i]))
-					bab_config_reg(sitem, BAB_DIV2_REG,
-							BAB_DIV2_BIT(babinfo->chip_conf[i]));
-				if (BAB_SLOW_SET(babinfo->old_conf[i]) !=
-						 BAB_SLOW_SET(babinfo->chip_conf[i]))
-					bab_config_reg(sitem, BAB_SLOW_REG,
-							BAB_SLOW_BIT(babinfo->chip_conf[i]));
-				if (BAB_OCLK_SET(babinfo->old_conf[i]) !=
-						 BAB_OCLK_SET(babinfo->chip_conf[i]))
-					bab_config_reg(sitem, BAB_OCLK_REG,
-							BAB_OCLK_BIT(babinfo->chip_conf[i]));
 				babinfo->old_conf[i] = babinfo->chip_conf[i];
+			} else {
+				if (babinfo->old_fast[i] != babinfo->chip_fast[i]) {
+					bab_set_osc(babinfo, i);
+					bab_add_data(sitem, BAB_OSC_ADDR, babinfo->osc, sizeof(babinfo->osc));
+					babinfo->old_fast[i] = babinfo->chip_fast[i];
+				}
+				if (babinfo->old_conf[i] != babinfo->chip_conf[i]) {
+					if (BAB_ICLK_SET(babinfo->old_conf[i]) !=
+							 BAB_ICLK_SET(babinfo->chip_conf[i]))
+						bab_config_reg(sitem, BAB_ICLK_REG,
+								BAB_ICLK_BIT(babinfo->chip_conf[i]));
+					if (BAB_FAST_SET(babinfo->old_conf[i]) !=
+							 BAB_FAST_SET(babinfo->chip_conf[i]))
+						bab_config_reg(sitem, BAB_FAST_REG,
+								BAB_FAST_BIT(babinfo->chip_conf[i]));
+					if (BAB_DIV2_SET(babinfo->old_conf[i]) !=
+							 BAB_DIV2_SET(babinfo->chip_conf[i]))
+						bab_config_reg(sitem, BAB_DIV2_REG,
+								BAB_DIV2_BIT(babinfo->chip_conf[i]));
+					if (BAB_SLOW_SET(babinfo->old_conf[i]) !=
+							 BAB_SLOW_SET(babinfo->chip_conf[i]))
+						bab_config_reg(sitem, BAB_SLOW_REG,
+								BAB_SLOW_BIT(babinfo->chip_conf[i]));
+					if (BAB_OCLK_SET(babinfo->old_conf[i]) !=
+							 BAB_OCLK_SET(babinfo->chip_conf[i]))
+						bab_config_reg(sitem, BAB_OCLK_REG,
+								BAB_OCLK_BIT(babinfo->chip_conf[i]));
+					babinfo->old_conf[i] = babinfo->chip_conf[i];
+				}
 			}
+			DATAS(sitem)->chip_off[i] = DATAS(sitem)->siz + 3;
+			chip_input = &(DATAW(DATAS(sitem)->witems[i])->chip_input);
+
+			if (babinfo->chip_conf[i])
+				bab_add_data(sitem, BAB_INP_ADDR, (uint8_t *)chip_input, sizeof(*chip_input));
+
+			chip_siz = DATAS(sitem)->siz - babinfo->chip_conf[i];
+			if (chip_siz < BAB_CHIP_MIN)
+				BAB_ADD_NOOPs(sitem, BAB_CHIP_MIN - chip_siz);
 		}
-		DATAS(sitem)->chip_off[i] = DATAS(sitem)->siz + 3;
-		chip_input = &(DATAW(DATAS(sitem)->witems[i])->chip_input);
-
-		if (babinfo->chip_conf[i])
-			bab_add_data(sitem, BAB_INP_ADDR, (uint8_t *)chip_input, sizeof(*chip_input));
-
-		chip_siz = DATAS(sitem)->siz - babinfo->chip_conf[i];
-		if (chip_siz < BAB_CHIP_MIN)
-			BAB_ADD_NOOPs(sitem, BAB_CHIP_MIN - chip_siz);
-
 		BAB_ADD_ASYNC(sitem);
 	}
 	DATAS(sitem)->chip_off[i] = DATAS(sitem)->siz;
@@ -1630,9 +1673,9 @@ static void *bab_spi(void *userdata)
 				k_add_head(babinfo->chip_work[chip], witem);
 #if UPDATE_HISTORY
 				babinfo->work_count[chip]++;
+#endif
 				if (babinfo->first_work[chip].tv_sec == 0)
 					memcpy(&(babinfo->first_work[chip]), &send, sizeof(send));
-#endif
 			}
 		}
 		K_WUNLOCK(babinfo->wfree_list);
@@ -1754,7 +1797,7 @@ static void process_history(struct cgpu_info *babcgpu, int chip, struct timeval 
 		chip_fast = babinfo->chip_fast[chip];
 
 		/*
-		 * If dead then step it down and remember the speed
+		 * If bad then step it down and remember the speed
 		 * TODO: does a speed change reset the chip? Or is there a reset?
 		 */
 		if (good_nonces == 0) {
@@ -1764,34 +1807,34 @@ static void process_history(struct cgpu_info *babcgpu, int chip, struct timeval 
 
 				babinfo->chip_fast[chip]--;
 
-				applog(LOG_WARNING, "%s%d: Chip %d DEAD - speed down from %d to %d",
+				applog(LOG_WARNING, "%s%d: Chip %d BAD - speed down from %d to %d",
 						    babcgpu->drv->name, babcgpu->device_id,
 						    chip, (int)chip_fast, (int)chip_fast - 1);
 			} else {
 				/*
-				 * Permanently DEAD since we're already at the minumum speed
+				 * Permanently BAD since we're already at the minumum speed
 				 * but only getting bad nonces
 				 */
-				if (babinfo->dead_msg[chip] == false) {
-					applog(LOG_WARNING, "%s%d: Chip %d DEAD - at min speed %d",
+				if (babinfo->bad_msg[chip] == false) {
+					applog(LOG_WARNING, "%s%d: Chip %d BAD - at min speed %d",
 							    babcgpu->drv->name, babcgpu->device_id,
 							    chip, (int)chip_fast);
 
-					babinfo->dead_msg[chip] = true;
+					babinfo->bad_msg[chip] = true;
 				}
 			}
 			goto tune_over;
 		}
 
 		/*
-		 * It 'was' permanently DEAD but a good nonce came back!
+		 * It 'was' permanently BAD but a good nonce came back!
 		 */
-		if (babinfo->dead_msg[chip]) {
+		if (babinfo->bad_msg[chip]) {
 			applog(LOG_WARNING, "%s%d: Chip %d REVIVED - at speed %d",
 					    babcgpu->drv->name, babcgpu->device_id,
 					    chip, (int)chip_fast);
 
-			babinfo->dead_msg[chip] = false;
+			babinfo->bad_msg[chip] = false;
 		}
 
 		/*
@@ -1977,6 +2020,22 @@ static K_ITEM *process_nonce(struct thr_info *thr, struct cgpu_info *babcgpu, K_
 		if (babinfo->chip_max_bad[chip] < babinfo->chip_cont_bad[chip])
 			babinfo->chip_max_bad[chip] = babinfo->chip_cont_bad[chip];
 
+		// Handle chips with only bad results
+		if (babinfo->disabled[chip] == false &&
+		    babinfo->chip_good[chip] == 0 &&
+		    babinfo->chip_bad[chip] >= BAB_BAD_COUNT &&
+		    tdiff(&now, &(babinfo->first_work[chip])) >= BAB_BAD_TO_MIN) {
+			if (babinfo->chip_fast[chip] > babinfo->min_speed)
+				babinfo->chip_fast[chip] = babinfo->min_speed;
+			else if (tdiff(&now, &(babinfo->first_work[chip])) > BAB_BAD_DEAD) {
+				babinfo->disabled[chip] = true;
+				babinfo->total_disabled++;
+				applog(LOG_ERR, "%s%i: chip %d disabled!",
+						babcgpu->drv->name,
+						babcgpu->device_id,
+						chip);
+			}
+		}
 #if UPDATE_HISTORY
 		process_history(babcgpu, chip, &(DATAR(ritem)->when), false, &now);
 #endif
@@ -2087,48 +2146,54 @@ static bool bab_do_work(struct cgpu_info *babcgpu)
 	K_WUNLOCK(babinfo->sfree_list);
 
 	for (chip = 0; chip < babinfo->chips; chip++) {
-		// TODO: ignore stale work
-		K_WLOCK(babinfo->available_work);
-		witem = k_unlink_tail(babinfo->available_work);
-		K_WUNLOCK(babinfo->available_work);
-		if (!witem) {
-			applog(LOG_ERR, "%s%i: short work list (%d) expected %d - reset",
-					babcgpu->drv->name, babcgpu->device_id,
-					chip, babinfo->chips);
-
-			// Put them back in the order they were taken
+		if (!(babinfo->disabled[chip])) {
+			// TODO: ignore stale work
 			K_WLOCK(babinfo->available_work);
-			for (j = chip-1; j >= 0; j--) {
-				witem = DATAS(sitem)->witems[j];
-				k_add_tail(babinfo->available_work, witem);
-			}
+			witem = k_unlink_tail(babinfo->available_work);
 			K_WUNLOCK(babinfo->available_work);
+			if (!witem) {
+				applog(LOG_ERR, "%s%i: short work list (%d) %d expected %d - reset",
+						babcgpu->drv->name, babcgpu->device_id,
+						chip, work_items,
+						babinfo->chips - babinfo->total_disabled);
 
-			K_WLOCK(babinfo->sfree_list);
-			k_add_head(babinfo->sfree_list, sitem);
-			K_WUNLOCK(babinfo->sfree_list);
+				// Put them back in the order they were taken
+				K_WLOCK(babinfo->available_work);
+				for (j = chip-1; j >= 0; j--) {
+					witem = DATAS(sitem)->witems[j];
+					if (witem)
+						k_add_tail(babinfo->available_work, witem);
+				}
+				K_WUNLOCK(babinfo->available_work);
 
-			return false;
+				K_WLOCK(babinfo->sfree_list);
+				k_add_head(babinfo->sfree_list, sitem);
+				K_WUNLOCK(babinfo->sfree_list);
+
+				return false;
+			}
+
+			/*
+			 * TODO: do this when we get work except on LP?
+			 * (not LP so we only do ms3steps for work required)
+			 * Though that may more likely trigger the applog(short work list) above?
+			 */
+			if (DATAW(witem)->ci_setup == false) {
+				memcpy((void *)&(DATAW(witem)->chip_input.midstate[0]),
+					DATAW(witem)->work->midstate,
+					sizeof(DATAW(witem)->work->midstate));
+				memcpy((void *)&(DATAW(witem)->chip_input.merkle7),
+					(void *)&(DATAW(witem)->work->data[WORK_MERKLE7]),
+					MERKLE_BYTES);
+
+				bab_ms3steps((void *)&(DATAW(witem)->chip_input));
+
+				DATAW(witem)->ci_setup = true;
+			}
+
+			DATAS(sitem)->witems[chip] = witem;
+			work_items++;
 		}
-
-		/*
-		 * TODO: do this when we get work except on LP?
-		 * (not LP so we only do ms3steps for work required)
-		 * Though that may more likely trigger the applog(short work list) above?
-		 */
-		if (DATAW(witem)->ci_setup == false) {
-			memcpy((void *)&(DATAW(witem)->chip_input.midstate[0]),
-				DATAW(witem)->work->midstate, sizeof(DATAW(witem)->work->midstate));
-			memcpy((void *)&(DATAW(witem)->chip_input.merkle7),
-				(void *)&(DATAW(witem)->work->data[WORK_MERKLE7]), MERKLE_BYTES);
-
-			bab_ms3steps((void *)&(DATAW(witem)->chip_input));
-
-			DATAW(witem)->ci_setup = true;
-		}
-
-		DATAS(sitem)->witems[chip] = witem;
-		work_items++;
 	}
 
 	// Send
@@ -2146,53 +2211,56 @@ static bool bab_do_work(struct cgpu_info *babcgpu)
 			  babcgpu->drv->name, babcgpu->device_id);
 
 	for (chip = 0; chip < babinfo->chips; chip++) {
-		K_WLOCK(babinfo->rfree_list);
-		ritem = k_unlink_head(babinfo->rfree_list);
-		K_WUNLOCK(babinfo->rfree_list);
+		if (!(babinfo->disabled[chip])) {
+			K_WLOCK(babinfo->rfree_list);
+			ritem = k_unlink_head(babinfo->rfree_list);
+			K_WUNLOCK(babinfo->rfree_list);
 
-		DATAR(ritem)->chip = chip;
-		DATAR(ritem)->not_first_reply = babinfo->not_first_reply[chip];
-		memcpy(&(DATAR(ritem)->when), &when, sizeof(when));
+			DATAR(ritem)->chip = chip;
+			DATAR(ritem)->not_first_reply = babinfo->not_first_reply[chip];
+			memcpy(&(DATAR(ritem)->when), &when, sizeof(when));
 
-		spichk = babinfo->chip_results[chip].spichk;
-		if (spichk != 0 && spichk != 0xffffffff) {
-			babinfo->chip_spie[chip]++;
-			spie++;
-		}
-
-		nonces = 0;
-		for (rep = 0; rep < BAB_REPLY_NONCES; rep++) {
-			nonce = babinfo->chip_results[chip].nonce[rep];
-			if (nonce != babinfo->chip_prev[chip].nonce[rep]) {
-				if ((nonce & BAB_EVIL_MASK) == BAB_EVIL_NONCE)
-					babinfo->discarded_e0s++;
-				else
-					DATAR(ritem)->nonce[nonces++] = nonce;
+			spichk = babinfo->chip_results[chip].spichk;
+			if (spichk != 0 && spichk != 0xffffffff) {
+				babinfo->chip_spie[chip]++;
+				spie++;
+				// Test the results anyway
 			}
+
+			nonces = 0;
+			for (rep = 0; rep < BAB_REPLY_NONCES; rep++) {
+				nonce = babinfo->chip_results[chip].nonce[rep];
+				if (nonce != babinfo->chip_prev[chip].nonce[rep]) {
+					if ((nonce & BAB_EVIL_MASK) == BAB_EVIL_NONCE)
+						babinfo->discarded_e0s++;
+					else
+						DATAR(ritem)->nonce[nonces++] = nonce;
+				}
+			}
+
+			if (nonces == BAB_REPLY_NONCES) {
+				babinfo->chip_miso[chip]++;
+				miso++;
+				// Test the results anyway
+			}
+
+			/*
+			 * Send even with zero nonces
+			 * so cleanup_older() is called for the chip
+			 */
+			DATAR(ritem)->nonces = nonces;
+			K_WLOCK(babinfo->res_list);
+			k_add_head(babinfo->res_list, ritem);
+			K_WUNLOCK(babinfo->res_list);
+
+			cgsem_post(&(babinfo->process_reply));
+
+			babinfo->not_first_reply[chip] = true;
+
+			memcpy((void *)(&(babinfo->chip_prev[chip])),
+				(void *)(&(babinfo->chip_results[chip])),
+				sizeof(struct bab_work_reply));
 		}
-
-		if (nonces == BAB_REPLY_NONCES) {
-			babinfo->chip_miso[chip]++;
-			miso++;
-			// Test the results anyway
-		}
-
-		/*
-		 * Send even with zero nonces
-		 * so cleanup_older() is called for the chip
-		 */
-		DATAR(ritem)->nonces = nonces;
-		K_WLOCK(babinfo->res_list);
-		k_add_head(babinfo->res_list, ritem);
-		K_WUNLOCK(babinfo->res_list);
-
-		cgsem_post(&(babinfo->process_reply));
-
-		babinfo->not_first_reply[chip] = true;
-
-		memcpy((void *)(&(babinfo->chip_prev[chip])),
-			(void *)(&(babinfo->chip_results[chip])),
-			sizeof(struct bab_work_reply));
 
 	}
 
@@ -2247,30 +2315,52 @@ static void bab_shutdown(struct thr_info *thr)
 static bool bab_queue_full(struct cgpu_info *babcgpu)
 {
 	struct bab_info *babinfo = (struct bab_info *)(babcgpu->device_data);
-	struct work *work;
+	int roll, roll_limit = BAB_MAX_ROLLTIME;
+	struct work *work, *usework;
 	K_ITEM *item;
-	int count;
-	bool ret;
+	int count, need;
+	bool ret, rolled;
 
 	K_RLOCK(babinfo->available_work);
 	count = babinfo->available_work->count;
 	K_RUNLOCK(babinfo->available_work);
 
-	if (count >= babinfo->chips)
+	if (count >= (babinfo->chips - babinfo->total_disabled))
 		ret = true;
 	else {
+		need = (babinfo->chips - babinfo->total_disabled) - count;
 		work = get_queued(babcgpu);
 		if (work) {
-			K_WLOCK(babinfo->wfree_list);
-			item = k_unlink_head_zero(babinfo->wfree_list);
-			DATAW(item)->work = work;
-			k_add_head(babinfo->available_work, item);
-			K_WUNLOCK(babinfo->wfree_list);
-		} else
+			if (roll_limit > work->drv_rolllimit)
+				roll_limit = work->drv_rolllimit;
+			roll = 0;
+			do {
+				if (roll == 0) {
+					usework = work;
+					babinfo->work_unrolled++;
+					rolled = false;
+				} else {
+					usework = copy_work_noffset(work, roll);
+					babinfo->work_rolled++;
+					rolled = true;
+				}
+
+				K_WLOCK(babinfo->wfree_list);
+				item = k_unlink_head_zero(babinfo->wfree_list);
+				DATAW(item)->work = usework;
+				DATAW(item)->rolled = rolled;
+				k_add_head(babinfo->available_work, item);
+				K_WUNLOCK(babinfo->wfree_list);
+			} while (--need > 0 && ++roll <= roll_limit);
+		} else {
 			// Avoid a hard loop when we can't get work fast enough
 			cgsleep_us(42);
+		}
 
-		ret = false;
+		if (need > 0)
+			ret = false;
+		else
+			ret = true;
 	}
 
 	return ret;
@@ -2325,7 +2415,7 @@ static struct api_data *bab_api_stats(struct cgpu_info *babcgpu)
 	char buf[32];
 	int spi_work, chip_work, sp, chip, bank, chip_off, board, last_board;
 	int i, to, j, k;
-	bool dead;
+	bool bad;
 	struct timeval now;
 	double elapsed, ghs;
 	float ghs_sum, his_ghs_tot;
@@ -2710,7 +2800,7 @@ static struct api_data *bab_api_stats(struct cgpu_info *babcgpu)
 			chip = babinfo->bank_first_chip[bank];
 			to = babinfo->bank_last_chip[bank];
 			for (; chip <= to; chip += BAB_BOARDCHIPS) {
-				dead = true;
+				bad = true;
 				for (k = chip; (k <= to) && (k < (chip+BAB_BOARDCHIPS)); k++) {
 					if (history_elapsed[k] > 0) {
 						double num = history_good[k];
@@ -2723,11 +2813,11 @@ static struct api_data *bab_api_stats(struct cgpu_info *babcgpu)
 						ghs = 0;
 
 					if (ghs > 0.0) {
-						dead = false;
+						bad = false;
 						break;
 					}
 				}
-				if (dead) {
+				if (bad) {
 					board = (int)((float)(chip - babinfo->bank_first_chip[bank]) /
 							BAB_BOARDCHIPS) + 1;
 					snprintf(buf, sizeof(buf),
@@ -2741,7 +2831,7 @@ static struct api_data *bab_api_stats(struct cgpu_info *babcgpu)
 			}
 		}
 	}
-	root = api_add_string(root, "History Dead Boards", data[0] ? data : "None", true);
+	root = api_add_string(root, "History Bad Boards", data[0] ? data : "None", true);
 
 	data[0] = '\0';
 	for (bank = i; bank <= j; bank++) {
@@ -2749,7 +2839,7 @@ static struct api_data *bab_api_stats(struct cgpu_info *babcgpu)
 			to = babinfo->bank_first_chip[bank];
 			chip = babinfo->bank_last_chip[bank];
 			for (; chip >= to; chip--) {
-				dead = true;
+				bad = true;
 				if (history_elapsed[chip] > 0) {
 					double num = history_good[chip];
 					// exclude the first nonce?
@@ -2765,15 +2855,15 @@ static struct api_data *bab_api_stats(struct cgpu_info *babcgpu)
 			}
 			/*
 			 * The output here is: a/b+c/d
-			 * a/b is the SPI/board that starts the Dead Chain
+			 * a/b is the SPI/board that starts the Bad Chain
 			 * c is the number of boards after a
-			 * d is the total number of chips in the Dead Chain
-			 * A Dead Chain is a continous set of dead chips that
+			 * d is the total number of chips in the Bad Chain
+			 * A Bad Chain is a continous set of bad chips that
 			 * finish at the end of an SPI chain of boards
 			 * This might be caused by the first board, or the cables attached
-			 * to the first board, in the Dead Chain i.e. a/b
+			 * to the first board, in the Bad Chain i.e. a/b
 			 * If c is zero, it's just the last board, so it's the same as any
-			 * other board having dead chips
+			 * other board having bad chips
 			 */
 			if (chip < babinfo->bank_last_chip[bank]) {
 				board = (int)((float)(chip - babinfo->bank_first_chip[bank]) /
@@ -2793,7 +2883,9 @@ static struct api_data *bab_api_stats(struct cgpu_info *babcgpu)
 			}
 		}
 	}
-	root = api_add_string(root, "History Dead Chains", data[0] ? data : "None", true);
+	root = api_add_string(root, "History Bad Chains", data[0] ? data : "None", true);
+
+	root = api_add_int(root, "Disabled Chips", &(babinfo->total_disabled), true);
 
 	for (i = 0; i < BAB_NONCE_OFFSETS; i++) {
 		snprintf(buf, sizeof(buf), "Nonce Offset 0x%08x", bab_nonce_offsets[i]);
@@ -2893,6 +2985,9 @@ static struct api_data *bab_api_stats(struct cgpu_info *babcgpu)
 	root = api_add_int(root, "Reply Wait", &(babinfo->reply_wait), true);
 	root = api_add_uint64(root, "Reply Waits", &(babinfo->reply_waits), true);
 
+	root = api_add_uint64(root, "Work Unrolled", &(babinfo->work_unrolled), true);
+	root = api_add_uint64(root, "Work Rolled", &(babinfo->work_rolled), true);
+
 	i = (int)(babinfo->max_speed);
 	root = api_add_int(root, bab_options[0], &i, true);
 	i = (int)(babinfo->def_speed);
@@ -2916,32 +3011,34 @@ static void bab_get_statline_before(char *buf, size_t bufsiz, struct cgpu_info *
 #if UPDATE_HISTORY
 	struct timeval now;
 	double elapsed;
-	int i, dead = 0;
+	int i, bad = 0;
 
 	cgtime(&now);
 	elapsed = tdiff(&now, &(babcgpu->dev_start_tv));
 
-	// At least get 15s of nonces before saying anything is dead
+	// At least get 15s of nonces before saying anything is bad
 	if (elapsed > 15.0) {
 		K_RLOCK(babinfo->nfree_list);
 		for (i = 0; i < babinfo->chips; i++) {
 			if (babinfo->good_nonces[i]->count == 0 &&
-			    babinfo->bad_nonces[i]->count > 1)
-				dead++;
+			     babinfo->bad_nonces[i]->count > 1)
+				bad++;
 		}
 		K_RUNLOCK(babinfo->nfree_list);
 	}
 
-	tailsprintf(buf, bufsiz, "%d.%02d.%03d D:%03d | ",
+	tailsprintf(buf, bufsiz, "%d.%02d.%03d B:%03d D:%03d",
 				 babinfo->banks,
 				 babinfo->boards,
 				 babinfo->chips,
-				 dead);
+				 bad,
+				 babinfo->total_disabled);
 #else
-	tailsprintf(buf, bufsiz, "B:%d B:%02d C:%03d | ",
+	tailsprintf(buf, bufsiz, "%d.%02d.%03d D:%03d",
 				 babinfo->banks,
 				 babinfo->boards,
-				 babinfo->chips);
+				 babinfo->chips,
+				 babinfo->total_disabled);
 #endif
 }
 #endif

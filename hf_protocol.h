@@ -81,6 +81,7 @@
 #define OP_CORE_MAP                     141         // Return core map
 #define OP_VERSION                      142         // Version information
 #define OP_FAN                          143         // Set Fan Speed
+#define OP_NAME                         144         // System name write/read
 #define OP_USB_DEBUG                    255
 
 // HashFast vendor and product ID's
@@ -113,6 +114,9 @@
 #define E_CORE_POWER_FAULT              17
 #define E_BAUD_TIMEOUT                  18
 #define E_ADDRESS_FAILURE               19
+#define E_IR_PROG_FAILURE               20
+#define E_MIXED_MISMATCH                21
+#define E_MIXED_TIMEOUT                 22
 
 #define U32SIZE(x)                      (sizeof(x)/sizeof(uint32_t))
 
@@ -297,7 +301,7 @@ struct hf_usb_init_header {
 	uint8_t  pll_bypass:1;                  // Force PLL bypass, hash clock = ref clock
 	uint8_t  no_asic_initialization:1;      // Do not perform automatic ASIC initialization
 	uint8_t  do_atspeed_core_tests:1;       // Do core tests at speed, return second bitmap
-	uint8_t  leave_powered_down:1;          // Init USB only, leave device powered down
+	uint8_t  shed_supported:1;              // Host supports gwq status shed_count
 
 	uint16_t hash_clock;                    // Requested hash clock frequency
 
