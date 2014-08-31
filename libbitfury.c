@@ -122,7 +122,7 @@ void spi_set_freq(struct bitfury_info *info)
 
 void spi_send_conf(struct bitfury_info *info)
 {
-	const int8_t nf1_counters[16] = { 64, 64, SECOND_BASE, SECOND_BASE+4, SECOND_BASE+2,
+	const int8_t nfu_counters[16] = { 64, 64, SECOND_BASE, SECOND_BASE+4, SECOND_BASE+2,
 		SECOND_BASE+2+16, SECOND_BASE, SECOND_BASE+1, (FIRST_BASE)%65, (FIRST_BASE+1)%65,
 		(FIRST_BASE+3)%65, (FIRST_BASE+3+16)%65, (FIRST_BASE+4)%65, (FIRST_BASE+4+4)%65,
 		(FIRST_BASE+3+3)%65, (FIRST_BASE+3+1+3)%65 };
@@ -136,7 +136,7 @@ void spi_send_conf(struct bitfury_info *info)
 		spi_config_reg(info, i, 0);
 	/* Program counters correctly for rounds processing, here it should
 	 * start consuming power */
-	spi_add_data(info, 0x0100, nf1_counters, 16);
+	spi_add_data(info, 0x0100, nfu_counters, 16);
 }
 
 void spi_send_init(struct bitfury_info *info)
@@ -181,6 +181,14 @@ void spi_add_break(struct bitfury_info *info)
 	spi_add_buf(info, "\x4", 1);
 }
 
+void spi_add_fasync(struct bitfury_info *info, int n)
+{
+	int i;
+
+	for (i = 0; i < n; i++)
+		spi_add_buf(info, "\x5", 1);
+}
+
 static void spi_add_buf_reverse(struct bitfury_info *info, const char *buf, const int sz)
 {
 	int i;
@@ -220,9 +228,9 @@ bool spi_reset(struct cgpu_info *bitfury, struct bitfury_info *info)
 	int r;
 
 	// SCK_OVRRIDE
-	mcp->value.pin[NF1_PIN_SCK_OVR] = MCP2210_GPIO_PIN_HIGH;
-	mcp->direction.pin[NF1_PIN_SCK_OVR] = MCP2210_GPIO_OUTPUT;
-	mcp->designation.pin[NF1_PIN_SCK_OVR] = MCP2210_PIN_GPIO;
+	mcp->value.pin[NFU_PIN_SCK_OVR] = MCP2210_GPIO_PIN_HIGH;
+	mcp->direction.pin[NFU_PIN_SCK_OVR] = MCP2210_GPIO_OUTPUT;
+	mcp->designation.pin[NFU_PIN_SCK_OVR] = MCP2210_PIN_GPIO;
 	if (!mcp2210_set_gpio_settings(bitfury, mcp))
 		return false;
 
@@ -235,14 +243,14 @@ bool spi_reset(struct cgpu_info *bitfury, struct bitfury_info *info)
 	}
 
 	// Deactivate override
-	mcp->direction.pin[NF1_PIN_SCK_OVR] = MCP2210_GPIO_INPUT;
+	mcp->direction.pin[NFU_PIN_SCK_OVR] = MCP2210_GPIO_INPUT;
 	if (!mcp2210_set_gpio_settings(bitfury, mcp))
 		return false;
 
 	return true;
 }
 
-bool spi_txrx(struct cgpu_info *bitfury, struct bitfury_info *info)
+bool mcp_spi_txrx(struct cgpu_info *bitfury, struct bitfury_info *info)
 {
 	unsigned int length, sendrcv;
 	int offset = 0;
@@ -272,6 +280,45 @@ bool spi_txrx(struct cgpu_info *bitfury, struct bitfury_info *info)
 	return true;
 }
 
+#define READ_WRITE_BYTES_SPI0     0x31
+
+bool ftdi_spi_txrx(struct cgpu_info *bitfury, struct bitfury_info *info)
+{
+	int err, amount, len;
+	uint16_t length;
+	char buf[1024];
+
+	len = info->spibufsz;
+	length = info->spibufsz - 1; //FTDI length is shifted by one 0x0000 = one byte
+	buf[0] = READ_WRITE_BYTES_SPI0;
+	buf[1] = length & 0x00FF;
+	buf[2] = (length & 0xFF00) >> 8;
+	memcpy(&buf[3], info->spibuf, info->spibufsz);
+	info->spibufsz += 3;
+	err = usb_write(bitfury, buf, info->spibufsz, &amount, C_BXM_SPITX);
+	if (err || amount != (int)info->spibufsz) {
+		applog(LOG_ERR, "%s %d: SPI TX error %d, sent %d of %d", bitfury->drv->name,
+		       bitfury->device_id, err, amount, info->spibufsz);
+		return false;
+	}
+	info->spibufsz = len;
+	/* We shouldn't even get a timeout error on reads in spi mode */
+	err = usb_read(bitfury, info->spibuf, len, &amount, C_BXM_SPIRX);
+	if (err || amount != len) {
+		applog(LOG_ERR, "%s %d: SPI RX error %d, read %d of %d", bitfury->drv->name,
+		       bitfury->device_id, err, amount, info->spibufsz);
+		return false;
+	}
+	amount = usb_buffer_size(bitfury);
+	if (amount) {
+		applog(LOG_ERR, "%s %d: SPI RX Extra read buffer size %d", bitfury->drv->name,
+		       bitfury->device_id, amount);
+		usb_buffer_clear(bitfury);
+		return false;
+	}
+	return true;
+}
+
 #define BT_OFFSETS 3
 
 bool bitfury_checkresults(struct thr_info *thr, struct work *work, uint32_t nonce)
@@ -290,13 +337,13 @@ bool bitfury_checkresults(struct thr_info *thr, struct work *work, uint32_t nonc
 	return false;
 }
 
+/* Currently really only supports 2 chips, so chip_n can only be 0 or 1 */
 bool libbitfury_sendHashData(struct thr_info *thr, struct cgpu_info *bitfury,
-			     struct bitfury_info *info)
+			     struct bitfury_info *info, int chip_n)
 {
-	unsigned *newbuf = info->newbuf;
-	unsigned *oldbuf = info->oldbuf;
-	struct bitfury_payload *p = &(info->payload);
-	struct bitfury_payload *op = &(info->opayload);
+	unsigned newbuf[17];
+	unsigned *oldbuf = &info->oldbuf[17 * chip_n];
+	struct bitfury_payload *p = &info->payload[chip_n];
 	unsigned int localvec[20];
 
 	/* Programming next value */
@@ -305,33 +352,34 @@ bool libbitfury_sendHashData(struct thr_info *thr, struct cgpu_info *bitfury,
 
 	spi_clear_buf(info);
 	spi_add_break(info);
+	spi_add_fasync(info, chip_n);
 	spi_add_data(info, 0x3000, (void*)localvec, 19 * 4);
-	if (!spi_txrx(bitfury, info))
+	if (!info->spi_txrx(bitfury, info))
 		return false;
 
-	memcpy(newbuf, info->spibuf + 4, 17 * 4);
+	memcpy(newbuf, info->spibuf + 4 + chip_n, 17 * 4);
 
-	info->job_switched = newbuf[16] != oldbuf[16];
+	info->job_switched[chip_n] = newbuf[16] != oldbuf[16];
 
-	if (likely(info->second_run)) {
-		if (info->job_switched) {
+	if (likely(info->second_run[chip_n])) {
+		if (info->job_switched[chip_n]) {
 			int i;
 
 			for (i = 0; i < 16; i++) {
-				if (oldbuf[i] != newbuf[i] && info->owork) {
+				if (oldbuf[i] != newbuf[i] && info->owork[chip_n]) {
 					uint32_t nonce; //possible nonce
 
 					nonce = decnonce(newbuf[i]);
-					if (bitfury_checkresults(thr, info->owork, nonce))
+					if (bitfury_checkresults(thr, info->owork[chip_n], nonce)) {
+						info->submits[chip_n]++;
 						info->nonces++;
+					}
 				}
 			}
-
-			memcpy(op, p, sizeof(struct bitfury_payload));
 			memcpy(oldbuf, newbuf, 17 * 4);
 		}
 	} else
-		info->second_run = true;
+		info->second_run[chip_n] = true;
 
 	cgsleep_ms(BITFURY_REFRESH_DELAY);
 

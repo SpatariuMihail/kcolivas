@@ -29,8 +29,8 @@
 		return (errno == EINTR);
 	}
 #elif defined WIN32
-	#include <ws2tcpip.h>
 	#include <winsock2.h>
+	#include <ws2tcpip.h>
 
 	#define SOCKETTYPE SOCKET
 	#define SOCKETFAIL(a) ((int)(a) == SOCKET_ERROR)
@@ -64,11 +64,7 @@
 	#endif
 #endif
 
-#if JANSSON_MAJOR_VERSION >= 2
 #define JSON_LOADS(str, err_ptr) json_loads((str), 0, (err_ptr))
-#else
-#define JSON_LOADS(str, err_ptr) json_loads((str), (err_ptr))
-#endif
 
 #ifdef HAVE_LIBCURL
 #include <curl/curl.h>
@@ -106,6 +102,10 @@ struct thr_info;
 struct pool;
 enum dev_reason;
 struct cgpu_info;
+void b58tobin(unsigned char *b58bin, const char *b58);
+void address_to_pubkeyhash(unsigned char *pkh, const char *addr);
+int ser_number(unsigned char *s, int32_t val);
+unsigned char *ser_string(char *s, int *slen);
 int thr_info_create(struct thr_info *thr, pthread_attr_t *attr, void *(*start) (void *), void *arg);
 void thr_info_cancel(struct thr_info *thr);
 void cgtime(struct timeval *tv);
@@ -133,6 +133,8 @@ int ms_tdiff(struct timeval *end, struct timeval *start);
 double tdiff(struct timeval *end, struct timeval *start);
 bool stratum_send(struct pool *pool, char *s, ssize_t len);
 bool sock_full(struct pool *pool);
+void _recalloc(void **ptr, size_t old, size_t new, const char *file, const char *func, const int line);
+#define recalloc(ptr, old, new) _recalloc((void *)&(ptr), old, new, __FILE__, __func__, __LINE__)
 char *recv_line(struct pool *pool);
 bool parse_method(struct pool *pool, char *s);
 bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port);
@@ -151,11 +153,13 @@ int _cgsem_mswait(cgsem_t *cgsem, int ms, const char *file, const char *func, co
 void cgsem_reset(cgsem_t *cgsem);
 void cgsem_destroy(cgsem_t *cgsem);
 bool cg_completion_timeout(void *fn, void *fnarg, int timeout);
+void _cg_memcpy(void *dest, const void *src, unsigned int n, const char *file, const char *func, const int line);
 
 #define cgsem_init(_sem) _cgsem_init(_sem, __FILE__, __func__, __LINE__)
 #define cgsem_post(_sem) _cgsem_post(_sem, __FILE__, __func__, __LINE__)
 #define cgsem_wait(_sem) _cgsem_wait(_sem, __FILE__, __func__, __LINE__)
 #define cgsem_mswait(_sem, _timeout) _cgsem_mswait(_sem, _timeout, __FILE__, __func__, __LINE__)
+#define cg_memcpy(dest, src, n) _cg_memcpy(dest, src, n, __FILE__, __func__, __LINE__)
 
 /* Align a size_t to 4 byte boundaries for fussy arches */
 static inline void align_len(size_t *len)

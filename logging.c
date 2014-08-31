@@ -54,7 +54,7 @@ void _applog(int prio, const char *str, bool force)
 {
 #ifdef HAVE_SYSLOG_H
 	if (use_syslog) {
-		syslog(prio, "%s", str);
+		syslog(LOG_LOCAL0 | prio, "%s", str);
 	}
 #else
 	if (0) {}
@@ -84,5 +84,25 @@ void _applog(int prio, const char *str, bool force)
 		}
 
 		my_log_curses(prio, datetime, str, force);
+	}
+}
+
+void _simplelog(int prio, const char *str, bool force)
+{
+#ifdef HAVE_SYSLOG_H
+	if (use_syslog) {
+		syslog(LOG_LOCAL0 | prio, "%s", str);
+	}
+#else
+	if (0) {}
+#endif
+	else {
+		/* Only output to stderr if it's not going to the screen as well */
+		if (!isatty(fileno((FILE *)stderr))) {
+			fprintf(stderr, "%s\n", str);	/* atomic write to stderr */
+			fflush(stderr);
+		}
+
+		my_log_curses(prio, "", str, force);
 	}
 }

@@ -23,7 +23,7 @@ to the next.
       
 For bitmain mode:
       autoreconf -fvi
-      CFLAGS="-O2 -msse2" ./configure --enable-bitmain --without-curses
+      CFLAGS="-O2 -msse2" ./configure --enable-bmsc --enable-bitmain
       make
 
 **************************************************************************************

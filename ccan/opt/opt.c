@@ -116,7 +116,7 @@ static void check_opt(const struct opt_table *entry)
 	const char *p;
 	unsigned len;
 
-	if (entry->type != OPT_HASARG && entry->type != OPT_NOARG)
+	if (entry->type != OPT_HASARG && entry->type != OPT_NOARG && entry->type != OPT_PROCESSARG)
 		errx(1, "Option %s: unknown entry type %u",
 		     entry->names, entry->type);
 
@@ -138,7 +138,7 @@ static void check_opt(const struct opt_table *entry)
 				errx(1, "Option %s: invalid short option"
 				     " '%.*s'", entry->names, len+1, p-1);
 			opt_num_short++;
-			if (entry->type == OPT_HASARG)
+			if (entry->type == OPT_HASARG || entry->type == OPT_PROCESSARG)
 				opt_num_short_arg++;
 		}
 		/* Don't document args unless there are some. */
