@@ -962,7 +962,7 @@ static char *set_userpass(const char *arg)
 		return "Failed to find : delimited user info";
 	pool->rpc_pass = strtok(NULL, ":");
 	if (!pool->rpc_pass)
-		return "Failed to find : delimited pass info";
+		pool->rpc_pass = strdup("");
 
 	return NULL;
 }
@@ -2568,7 +2568,6 @@ static int total_staged(void)
 WINDOW *mainwin, *statuswin, *logwin;
 #endif
 double total_secs = 1.0;
-double last_total_secs = 1.0;
 static char statusline[256];
 /* logstart is where the log window should start */
 static int devcursor, logstart, logcursor;
@@ -5226,7 +5225,6 @@ void zero_stats(void)
 	total_go = 0;
 	total_ro = 0;
 	total_secs = 1.0;
-	last_total_secs = 1.0;
 	total_diff1 = 0;
 	found_blocks = 0;
 	total_diff_accepted = 0;
@@ -6269,8 +6267,11 @@ static bool cnx_needed(struct pool *pool)
 	 * it. */
 	if (pool_strategy == POOL_FAILOVER && pool->prio < cp_prio())
 		return true;
+		/*We should not be checking for pool_unworkable in cnx_needed as it is keeping 
+		*stratum connections open on unused pools
+		
 	if (pool_unworkable(cp))
-		return true;
+		return true;*/
 	/* We've run out of work, bring anything back to life. */
 	if (no_work)
 		return true;
@@ -8940,16 +8941,18 @@ static bool input_pool(bool live)
 	wlogprint("Input server details.\n");
 
 	url = curses_input("URL");
-	if (!url)
+	if (!strcmp(url, "-1"))
 		goto out;
 
 	user = curses_input("Username");
-	if (!user)
+	if (!strcmp(user, "-1"))
 		goto out;
 
 	pass = curses_input("Password");
-	if (!pass)
-		goto out;
+	if (!strcmp(pass, "-1")) {
+		free(pass);
+		pass = strdup("");
+	}
 
 	pool = add_pool();
 
@@ -8971,12 +8974,9 @@ out:
 	immedok(logwin, false);
 
 	if (!ret) {
-		if (url)
-			free(url);
-		if (user)
-			free(user);
-		if (pass)
-			free(pass);
+		free(url);
+		free(user);
+		free(pass);
 	}
 	return ret;
 }
@@ -9766,7 +9766,9 @@ int main(int argc, char *argv[])
 		pool->cgminer_pool_stats.getwork_wait_min.tv_sec = MIN_SEC_UNSET;
 
 		if (!pool->rpc_userpass) {
-			if (!pool->rpc_user || !pool->rpc_pass)
+			if (!pool->rpc_pass)
+				pool->rpc_pass = strdup("");
+			if (!pool->rpc_user)
 				early_quit(1, "No login credentials supplied for pool %u %s", i, pool->rpc_url);
 			siz = strlen(pool->rpc_user) + strlen(pool->rpc_pass) + 2;
 			pool->rpc_userpass = malloc(siz);
