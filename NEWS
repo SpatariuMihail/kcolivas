@@ -1,4 +1,4 @@
-Version 4.6.0 - 8th September 2014
+Version 4.6.0 - 7th September 2014
 
 - We should not be checking for pool_unworkable in cnx_needed as it is keeping
 stratum connections open on unused pools
