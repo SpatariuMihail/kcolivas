@@ -20,6 +20,11 @@ bool opt_log_output = false;
 
 /* per default priorities higher than LOG_NOTICE are logged */
 int opt_log_level = LOG_NOTICE;
+FILE * g_log_file = NULL;
+
+bool g_logfile_enable = false;
+char g_logfile_path[256] = {0};
+char g_logfile_openflag[32] = {0};
 
 static void my_log_curses(int prio, const char *datetime, const char *str, bool force)
 {
@@ -82,7 +87,17 @@ void _applog(int prio, const char *str, bool force)
 			fprintf(stderr, "%s%s\n", datetime, str);	/* atomic write to stderr */
 			fflush(stderr);
 		}
-
+			if(g_logfile_enable) {
+			if(!g_log_file) {
+				g_log_file = fopen(g_logfile_path, g_logfile_openflag);
+			}
+			if(g_log_file) {
+				fwrite(datetime, strlen(datetime), 1, g_log_file);
+				fwrite(str, strlen(str), 1, g_log_file);
+				fwrite("\n", 1, 1, g_log_file);
+				fflush(g_log_file);
+			}
+		}
 		my_log_curses(prio, datetime, str, force);
 	}
 }

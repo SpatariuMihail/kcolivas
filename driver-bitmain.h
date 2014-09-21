@@ -1,6 +1,6 @@
 /*
  * Copyright 2013 BitMain project
- * Copyright 2013-2014 BitMain <lingchao.xu@bitmaintech.com>
+ * Copyright 2013 BitMain <xlc1985@126.com>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -17,7 +17,8 @@
 
 //#define BITMAIN_TYPE_S1
 //#define BITMAIN_TYPE_S2
-#define BITMAIN_TYPE_S3
+//#define BITMAIN_TYPE_S3
+#define BITMAIN_TYPE_S4
 
 #define BITMAIN_RESET_FAULT_DECISECONDS 1
 #define BITMAIN_MINER_THREADS 1
@@ -49,7 +50,9 @@
 #define BITMAIN_MAX_FREQUENCY 1000000
 #define BITMAIN_TIMEOUT_FACTOR 12690
 #define BITMAIN_DEFAULT_FREQUENCY 282
-#define BITMAIN_DEFAULT_VOLTAGE 5
+#define BITMAIN_DEFAULT_VOLTAGE_T "0725"
+#define BITMAIN_DEFAULT_VOLTAGE0 0x07
+#define BITMAIN_DEFAULT_VOLTAGE1 0x25
 #define BITMAIN_DEFAULT_CHAIN_NUM 8
 #define BITMAIN_DEFAULT_ASIC_NUM 32
 #define BITMAIN_DEFAULT_REG_DATA 0
@@ -103,6 +106,19 @@
 #define BITMAIN_SEND_FULL_SPACE    256
 #endif
 
+#ifdef BITMAIN_TYPE_S4
+#define BITMAIN_MAX_WORK_NUM       64
+#define BITMAIN_MAX_WORK_QUEUE_NUM 4096
+#define BITMAIN_MAX_DEAL_QUEUE_NUM 32
+#define BITMAIN_MAX_NONCE_NUM      128
+#define BITMAIN_MAX_CHAIN_NUM      16
+#define BITMAIN_MAX_TEMP_NUM       32
+#define BITMAIN_MAX_FAN_NUM        32
+
+#define BITMAIN_SEND_STATUS_TIME   15 //s
+#define BITMAIN_SEND_FULL_SPACE    512
+#endif
+
 struct bitmain_packet_head {
 	uint8_t token_type;
 	uint8_t version;
@@ -124,7 +140,8 @@ struct bitmain_txconfig_token {
 	uint8_t beeper_ctrl          :1;
 	uint8_t temp_over_ctrl       :1;
 	uint8_t reserved1            :6;
-	uint8_t reserved2[2];
+	uint8_t chain_check_time;
+	uint8_t reserved2;
 
 	uint8_t chain_num;
 	uint8_t asic_num;
@@ -132,8 +149,7 @@ struct bitmain_txconfig_token {
 	uint8_t timeout_data;
 
 	uint16_t frequency;
-	uint8_t voltage;
-	uint8_t chain_check_time;
+	uint8_t voltage[2];
 
 	uint8_t reg_data[4];
 	uint8_t chip_address;
@@ -242,7 +258,9 @@ struct bitmain_info {
 
 	int frequency;
 	char frequency_t[256];
-	int voltage;
+	uint8_t voltage[2];
+	char voltage_t[8];
+
 	int diff;
 
 	int no_matching_work;
@@ -291,12 +309,9 @@ extern int opt_bitmain_temp;
 extern int opt_bitmain_overheat;
 extern int opt_bitmain_fan_min;
 extern int opt_bitmain_fan_max;
-extern int opt_bitmain_freq_min;
-extern int opt_bitmain_freq_max;
 extern bool opt_bitmain_auto;
 extern char *set_bitmain_dev(char *arg);
 extern char *set_bitmain_fan(char *arg);
-extern char *set_bitmain_freq(char *arg);
 
 #endif /* USE_BITMAIN */
 #endif	/* BITMAIN_H */

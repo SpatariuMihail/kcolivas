@@ -115,6 +115,11 @@ struct strategies strategies[] = {
 
 static char packagename[256];
 
+FILE * g_logwork_file = NULL;
+FILE * g_logwork_files[65] = {0};
+FILE * g_logwork_diffs[65] = {0};
+int g_logwork_asicnum = 0;
+
 bool opt_work_update;
 bool opt_protocol;
 static struct benchfile_layout {
@@ -171,6 +176,9 @@ bool opt_restart = true;
 bool opt_nogpu;
 
 struct list_head scan_devices;
+static bool devices_enabled[MAX_DEVICES];
+static int opt_devs_enabled;
+
 static bool opt_display_devs;
 int total_devices;
 int zombie_devs;
@@ -178,6 +186,11 @@ static int most_devices;
 struct cgpu_info **devices;
 int mining_threads;
 int num_processors;
+char work_proxy_ip[256] = {0};
+unsigned short work_proxy_port = 9876;
+int work_proxy_socket = -1;
+char work_proxy_jobid[256] = {0};
+
 #ifdef HAVE_CURSES
 bool use_curses = true;
 #else
@@ -194,7 +207,13 @@ bool opt_lowmem;
 bool opt_autofan;
 bool opt_autoengine;
 bool opt_noadl;
+char *opt_work_proxy = NULL;
 char *opt_version_path = NULL;
+char *opt_logfile_path = NULL;
+char *opt_logfile_openflag = NULL;
+char *opt_logwork_path = NULL;
+char *opt_logwork_asicnum = NULL;
+bool opt_logwork_diff = false;
 char *opt_api_allow = NULL;
 char *opt_api_groups;
 char *opt_api_description = PACKAGE_STRING;
@@ -244,6 +263,9 @@ char *opt_bitmine_a1_options = NULL;
 #ifdef USE_BMSC
 char *opt_bmsc_options = NULL;
 char *opt_bmsc_timing = NULL;
+char *opt_bmsc_bandops = NULL;
+char *opt_bmsc_voltage = NULL;
+bool opt_bmsc_bootstart = false;
 bool opt_bmsc_gray = false;
 char *opt_bmsc_freq = NULL;
 char *opt_bmsc_rdreg = NULL;
@@ -251,6 +273,9 @@ bool opt_bmsc_rdworktest = false;
 #endif
 #ifdef USE_BITMAIN
 char *opt_bitmain_options = NULL;
+char *opt_bitmain_voltage = NULL;
+char *opt_bitmain_freq = NULL;
+
 #endif
 #ifdef USE_HASHFAST
 static char *opt_set_hfa_fan;
@@ -804,6 +829,49 @@ void get_intrange(char *arg, int *val1, int *val2)
 		*val2 = *val1;
 }
 
+static char *set_devices(char *arg)
+{
+	int i, val1 = 0, val2 = 0;
+	char *nextptr;
+
+	if (*arg) {
+		if (*arg == '?') {
+			opt_display_devs = true;
+			return NULL;
+		}
+	} else
+		return "Invalid device parameters";
+
+	nextptr = strtok(arg, ",");
+	if (nextptr == NULL)
+		return "Invalid parameters for set devices";
+	get_intrange(nextptr, &val1, &val2);
+	if (val1 < 0 || val1 > MAX_DEVICES || val2 < 0 || val2 > MAX_DEVICES ||
+	    val1 > val2) {
+		return "Invalid value passed to set devices";
+	}
+
+	for (i = val1; i <= val2; i++) {
+		devices_enabled[i] = true;
+		opt_devs_enabled++;
+	}
+
+	while ((nextptr = strtok(NULL, ",")) != NULL) {
+		get_intrange(nextptr, &val1, &val2);
+		if (val1 < 0 || val1 > MAX_DEVICES || val2 < 0 || val2 > MAX_DEVICES ||
+		val1 > val2) {
+			return "Invalid value passed to set devices";
+		}
+
+		for (i = val1; i <= val2; i++) {
+			devices_enabled[i] = true;
+			opt_devs_enabled++;
+		}
+	}
+
+	return NULL;
+}
+
 static char *set_balance(enum pool_strategy *strategy)
 {
 	*strategy = POOL_BALANCE;
@@ -1073,6 +1141,42 @@ static void load_temp_cutoffs()
 	}
 }
 
+static char *set_work_proxy(const char *arg)
+{
+	opt_set_charp(arg, &opt_work_proxy);
+
+	return NULL;
+}
+
+
+
+static char *set_logfile_path(const char *arg)
+{
+	opt_set_charp(arg, &opt_logfile_path);
+
+	return NULL;
+}
+
+static char *set_logfile_openflag(const char *arg)
+{
+	opt_set_charp(arg, &opt_logfile_openflag);
+
+	return NULL;
+}
+
+static char *set_logwork_path(const char *arg)
+{
+	opt_set_charp(arg, &opt_logwork_path);
+
+	return NULL;
+}
+
+static char *set_logwork_asicnum(const char *arg)
+{
+	opt_set_charp(arg, &opt_logwork_asicnum);
+
+	return NULL;
+}
 static char *set_float_125_to_500(const char *arg, float *i)
 {
 	char *err = opt_set_floatval(arg, i);
@@ -1107,6 +1211,18 @@ static char *set_bmsc_timing(const char *arg)
 
 	return NULL;
 }
+static char *set_bmsc_bandops(const char *arg)
+{
+	opt_set_charp(arg, &opt_bmsc_bandops);
+
+	return NULL;
+}
+static char *set_bmsc_voltage(const char *arg)
+{
+	opt_set_charp(arg, &opt_bmsc_voltage);
+
+	return NULL;
+}
 
 static char *set_bmsc_freq(const char *arg)
 {
@@ -1130,6 +1246,20 @@ static char *set_bitmain_options(const char *arg)
 
 	return NULL;
 }
+static char *set_bitmain_voltage(const char *arg)
+{
+	opt_set_charp(arg, &opt_bitmain_voltage);
+
+	return NULL;
+}
+static char *set_bitmain_freq(const char *arg)
+{
+	opt_set_charp(arg, &opt_bitmain_freq);
+
+	return NULL;
+}
+
+
 #endif
 
 static char *set_null(const char __maybe_unused *arg)
@@ -1265,6 +1395,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_ARG("--bmsc-timing",
 		     set_bmsc_timing, NULL, NULL,
 		     opt_hidden),
+	OPT_WITH_ARG("--bmsc-bandops",
+		     set_bmsc_bandops, NULL, NULL,
+		     opt_hidden),
 	OPT_WITHOUT_ARG("--bmsc-gray",
 		     opt_set_bool, &opt_bmsc_gray,
 		     "Use gray"),
@@ -1274,6 +1407,12 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_ARG("--bmsc-rdreg",
 		     set_bmsc_rdreg, NULL, NULL,
 		     opt_hidden),
+	OPT_WITH_ARG("--bmsc-voltage",
+		     set_bmsc_voltage, NULL, NULL,
+		     opt_hidden),
+	OPT_WITHOUT_ARG("--bmsc-bootstart",
+		     opt_set_bool, &opt_bmsc_bootstart,
+		     "Enable boot start, default: disabled"),
 	OPT_WITHOUT_ARG("--bmsc-rdworktest",
 		     opt_set_bool, &opt_bmsc_rdworktest,
 		     "Record work test data to file"),
@@ -1309,6 +1448,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_ARG("--bitmain-freq",
 		     set_bitmain_freq, NULL, NULL,
 		     "Set frequency range for bitmain-auto, single value or range"),
+	OPT_WITH_ARG("--bitmain-voltage",
+		     set_bitmain_voltage, NULL, NULL,
+		     "Set voltage"),
 	OPT_WITH_ARG("--bitmain-options",
 		     set_bitmain_options, NULL, NULL,
 		     "Set bitmain options baud:miners:asic:timeout:freq"),
@@ -9495,6 +9637,11 @@ int main(int argc, char *argv[])
 	unsigned int k;
 	char *s;
 
+	g_logfile_enable = false;
+	strcpy(g_logfile_path, "cgminer.log");
+	strcpy(g_logfile_openflag, "a+");
+	strcpy(work_proxy_ip, "127.0.0.1");
+	
 	/* This dangerous functions tramples random dynamically allocated
 	 * variables so do it before anything at all */
 	if (unlikely(curl_global_init(CURL_GLOBAL_ALL)))
@@ -9615,7 +9762,24 @@ int main(int argc, char *argv[])
 		}
 		set_target(bench_target, 32);
 	}
+	
+	if(opt_work_proxy) {
+			char *colon = NULL, *colon2 = NULL;
+			colon = opt_work_proxy;
+			colon2 = strchr(colon, ':');
+			if (colon2)
+				*(colon2++) = '\0';
+	
+			strcpy(work_proxy_ip, colon);
+	
+			if (colon2 && *colon2) {
+				work_proxy_port = atoi(colon2);
+			}
+	
+			applog(LOG_ERR, "Work proxy ip: %s port: %d", work_proxy_ip, work_proxy_port);
+		}
 
+	
 	if(opt_version_path) {
 		FILE * fpversion = fopen(opt_version_path, "rb");
 		char tmp[256] = {0};
@@ -9647,6 +9811,55 @@ int main(int argc, char *argv[])
 		}
 		applog(LOG_ERR, "Miner compile time: %s type: %s", g_miner_compiletime, g_miner_type);
 	}
+	if(opt_logfile_path) {
+		g_logfile_enable = true;
+		strcpy(g_logfile_path, opt_logfile_path);
+		if(opt_logfile_openflag) {
+			strcpy(g_logfile_openflag, opt_logfile_openflag);
+		}
+		applog(LOG_ERR, "Log file path: %s Open flag: %s", g_logfile_path, g_logfile_openflag);
+	}
+
+	if(opt_logwork_path) {
+		char szfilepath[256] = {0};
+		if(opt_logwork_asicnum) {
+			if(strlen(opt_logwork_asicnum) <= 0) {
+				quit(1, "Log work asic num empty");
+			}
+			g_logwork_asicnum = atoi(opt_logwork_asicnum);
+			if(g_logwork_asicnum != 1 && g_logwork_asicnum != 32 && g_logwork_asicnum != 64) {
+				quit(1, "Log work asic num must be 1, 32, 64");
+			}
+			applog(LOG_ERR, "Log work path: %s Asic num: %s", opt_logwork_path, opt_logwork_asicnum);
+		} else {
+			applog(LOG_ERR, "Log work path: %s", opt_logwork_path);
+		}
+
+		sprintf(szfilepath, "%s.txt", opt_logwork_path);
+		g_logwork_file = fopen(szfilepath, "a+");
+		applog(LOG_ERR, "Log work open file %s", szfilepath);
+
+		if(g_logwork_asicnum == 1) {
+			sprintf(szfilepath, "%s%02d.txt", opt_logwork_path, g_logwork_asicnum);
+			g_logwork_files[0] = fopen(szfilepath, "a+");
+			applog(LOG_ERR, "Log work open asic %d file %s", g_logwork_asicnum, szfilepath);
+		} else if(g_logwork_asicnum == 32 || g_logwork_asicnum == 64) {
+			for(i = 0; i <= g_logwork_asicnum; i++) {
+				sprintf(szfilepath, "%s%02d_%02d.txt", opt_logwork_path, g_logwork_asicnum, i);
+				g_logwork_files[i] = fopen(szfilepath, "a+");
+				applog(LOG_ERR, "Log work open asic %d file %s", g_logwork_asicnum, szfilepath);
+			}
+		}
+
+		if(opt_logwork_diff) {
+			for(i = 0; i <= 64; i++) {
+				sprintf(szfilepath, "%s_diff_%02d.txt", opt_logwork_path, i);
+				g_logwork_diffs[i] = fopen(szfilepath, "a+");
+				applog(LOG_ERR, "Log work open diff file %s", szfilepath);
+			}
+		}
+	}
+	
 
 #ifdef HAVE_CURSES
 	if (opt_realquiet || opt_display_devs)

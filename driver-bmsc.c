@@ -199,6 +199,8 @@ struct BMSC_INFO {
 	enum timing_mode timing_mode;
 	bool do_bmsc_timing;
 
+	bool start;
+
 	double fullnonce;
 	int count;
 	double W;
@@ -546,7 +548,7 @@ static const char *timing_mode_str(enum timing_mode timing_mode)
 	}
 }
 
-static void set_timing_mode(int this_option_offset, struct cgpu_info *bmsc, int readtimeout)
+static void set_timing_mode(int this_option_offset, struct cgpu_info *bmsc, float readtimeout)
 {
 	struct BMSC_INFO *info = (struct BMSC_INFO *)(bmsc->device_data);
 	enum sub_ident ident;
@@ -583,13 +585,10 @@ static void set_timing_mode(int this_option_offset, struct cgpu_info *bmsc, int 
 	info->read_time_limit = 0; // 0 = no limit
 
 	info->fullnonce = info->Hs * (((double) 0xffffffff) + 1);
-	info->read_time = readtimeout * BMSC_WAIT_TIMEOUT;
+	info->read_time = (int)(readtimeout * BMSC_WAIT_TIMEOUT);
 
-	if (info->read_time < BMSC_READ_COUNT_MIN)
-		info->read_time = SECTOMS(info->fullnonce) - BMSC_READ_REDUCE;
-
-	if (unlikely(info->read_time < BMSC_READ_COUNT_MIN))
-		info->read_time = BMSC_READ_COUNT_MIN;
+	if(info->read_time < 0)
+		info->read_time = 1;
 
 	info->timing_mode = MODE_DEFAULT;
 	info->do_bmsc_timing = false;
@@ -599,7 +598,7 @@ static void set_timing_mode(int this_option_offset, struct cgpu_info *bmsc, int 
 	// All values are in multiples of BMSC_WAIT_TIMEOUT
 	info->read_time_limit *= BMSC_WAIT_TIMEOUT;
 
-	applog(LOG_DEBUG, "%s: cgid %d Init: mode=%s read_time=%dms limit=%dms Hs=%e",
+	applog(LOG_ERR, "%s%d Init: mode=%s read_time=%dms limit=%dms Hs=%e",
 			bmsc->drv->name, bmsc->cgminer_id,
 			timing_mode_str(info->timing_mode),
 			info->read_time, info->read_time_limit, info->Hs);
@@ -630,13 +629,14 @@ static uint32_t mask(int work_division)
 	return nonce_mask;
 }
 
-static void get_options(int this_option_offset, struct cgpu_info *bmsc, int *baud, int *readtimeout)
+static void get_options(int this_option_offset, struct cgpu_info *bmsc, int *baud, float *readtimeout)
 {
 	char buf[BUFSIZ+1];
 	char *ptr, *comma, *colon, *colon2;
 	enum sub_ident ident;
 	size_t max;
 	int i, tmp;
+	float tmpf;
 
 	if (opt_bmsc_options == NULL)
 		buf[0] = '\0';
@@ -702,11 +702,69 @@ static void get_options(int this_option_offset, struct cgpu_info *bmsc, int *bau
 		}
 
 		if (colon && *colon) {
-			tmp = atoi(colon);
-			if (tmp > 0) {
-				*readtimeout = tmp;
+			tmpf = atof(colon);
+			if (tmpf > 0) {
+				*readtimeout = tmpf;
 			} else {
 				quit(1, "Invalid bmsc-options for timeout (%s) must be > 0", colon);
+			}
+		}
+	}
+}
+
+static void get_bandops(unsigned char * core_buf, int *corenum, char *coreenable, int *coresleep)
+{
+	char buf[512] = {0};
+	char *colon, *colon2, * colon3;
+	int i, len;
+
+	if (opt_bmsc_bandops) {
+		len = strlen(opt_bmsc_bandops);
+		if(len <= 0 || len >= 512) {
+			quit(1, "Invalid bmsc-bandops %s %d", opt_bmsc_bandops, len);
+		}
+		strcpy(buf, opt_bmsc_bandops);
+		colon = strchr(buf, ':');
+		if (colon)
+			*(colon++) = '\0';
+
+		if (*buf) {
+			if(strlen(buf) > 8 || strlen(buf)%2 != 0 || strlen(buf)/2 == 0) {
+				quit(1, "Invalid bitmain-options for core command, must be hex now: %s", buf);
+			}
+			memset(core_buf, 0, 4);
+			if(!hex2bin(core_buf, buf, strlen(buf)/2)) {
+				quit(1, "Invalid bitmain-options for core command, hex2bin error now: %s", buf);
+			}
+		}
+
+		if (colon && *colon) {
+			colon2 = strchr(colon, ':');
+			if (colon2)
+				*(colon2++) = '\0';
+
+			if (*colon) {
+				*corenum = atoi(colon);
+				if(*corenum <= 0 || *corenum >= 256) {
+					quit(1, "Invalid bitmain-bandops for asic core num, must %d be > 0 and < 256", *corenum);
+				}
+			}
+
+			if(colon2 && *colon2) {
+				colon3 = strchr(colon2, ':');
+				if (colon3)
+					*(colon3++) = '\0';
+
+				if(*colon2) {
+					strcpy(coreenable, colon2);
+					if(strlen(coreenable) != *corenum) {
+						quit(1, "Invalid bitmain-bandops for asic core enable, must be equal core num %d", *corenum);
+					}
+				}
+
+				if (colon3 && *colon3) {
+					*coresleep = atoi(colon3);
+				}
 			}
 		}
 	}
@@ -726,14 +784,20 @@ static struct cgpu_info *bmsc_detect_one(struct libusb_device *dev, struct usb_f
 		"4679ba4ec99876bf4bfe086082b40025"
 		"4df6c356451471139a3afa71e48f544a"
 		"00000000000000000000000000000000"
-		"0000000087320b1a1426674f2fa722ce";
+		"0000001f87320b1a1426674f2fa722ce";
+	char bandops_ob[] =
+		"00000000000000000000000000000000"
+		"00000000000000000000000000000000"
+		"00000000000000000000000000000000"
+		"00000000000000000000000000000000";
 
 	const char golden_nonce[] = "000187a2";
 	const uint32_t golden_nonce_val = 0x000187a2;
 	unsigned char nonce_bin[BMSC_READ_SIZE];
 	struct BMSC_WORK workdata;
 	char *nonce_hex;
-	int baud = 115200, work_division = 1, fpga_count = 1, readtimeout = 1;
+	int baud = 115200, work_division = 1, fpga_count = 1;
+	float readtimeout = 1.0;
 	struct cgpu_info *bmsc;
 	int ret, err, amount, tries, i;
 	bool ok;
@@ -743,6 +807,7 @@ static struct cgpu_info *bmsc_detect_one(struct libusb_device *dev, struct usb_f
 	unsigned char cmd_buf[4] = {0};
 	unsigned char rdreg_buf[4] = {0};
 	unsigned char reg_data[4] = {0};
+	unsigned char voltage_data[2] = {0};
 
 	unsigned char rebuf[BMSC_READ_BUF_LEN] = {0};
 	int relen = 0;
@@ -752,11 +817,18 @@ static struct cgpu_info *bmsc_detect_one(struct libusb_device *dev, struct usb_f
 	int sendfreqstatus = 1;
 	int k = 0;
 
+	unsigned char core_cmd[4] = {0};
+	int corenum = 0;
+	char coreenable[256] = {0};
+	int coresleep = 0;
+
 	if (opt_bmsc_options == NULL)
 		return NULL;
 
 	if ((sizeof(workdata) << 1) != (sizeof(golden_ob) - 1))
 		quithere(1, "Data and golden_ob sizes don't match");
+	if ((sizeof(workdata) << 1) != (sizeof(bandops_ob) - 1))
+			quithere(1, "Data and bandops_ob sizes don't match");
 
 	bmsc = usb_alloc_cgpu(&bmsc_drv, 1);
 
@@ -764,8 +836,7 @@ static struct cgpu_info *bmsc_detect_one(struct libusb_device *dev, struct usb_f
 		goto shin;
 
 	get_options(this_option_offset, bmsc, &baud, &readtimeout);
-
-	hex2bin((void *)(&workdata), golden_ob, sizeof(workdata));
+	get_bandops(core_cmd, &corenum, coreenable, &coresleep);
 
 	info = (struct BMSC_INFO *)calloc(1, sizeof(struct BMSC_INFO));
 	if (unlikely(!info))
@@ -773,6 +844,7 @@ static struct cgpu_info *bmsc_detect_one(struct libusb_device *dev, struct usb_f
 	bmsc->device_data = (void *)info;
 
 	info->ident = usb_ident(bmsc);
+	info->start = true;
 	switch (info->ident) {
 		case IDENT_ICA:
 		case IDENT_BLT:
@@ -802,6 +874,68 @@ cmr2_retry:
 	ok = false;
 	while (!ok && tries-- > 0) {
 		bmsc_initialise(bmsc, baud);
+
+		if(opt_bmsc_bootstart) {
+			applog(LOG_ERR, "---------------------start bootstart----------------------");
+			cmd_buf[0] = 0xbb;
+			cmd_buf[1] = 0x00;
+			cmd_buf[2] = 0x00;
+			cmd_buf[3] = 0x00;  //0-7
+			cmd_buf[3] = CRC5(cmd_buf, 27);
+			cmd_buf[3] |= 0x80;
+
+			cgsleep_ms(500);
+			applog(LOG_ERR, "Send bootstart off %02x%02x%02x%02x", cmd_buf[0], cmd_buf[1], cmd_buf[2], cmd_buf[3]);
+			err = usb_write(bmsc, (char * )cmd_buf, 4, &amount, C_SENDTESTWORK);
+			if (err != LIBUSB_SUCCESS || amount != 4) {
+				applog(LOG_ERR, "Write bootstart Comms error (werr=%d amount=%d)", err, amount);
+				continue;
+			}
+
+			cmd_buf[0] = 0xbb;
+			cmd_buf[1] = 0x08;
+			cmd_buf[2] = 0x00;
+			cmd_buf[3] = 0x00;  //0-7
+			cmd_buf[3] = CRC5(cmd_buf, 27);
+			cmd_buf[3] |= 0x80;
+
+			cgsleep_ms(500);
+			applog(LOG_ERR, "Send bootstart on  %02x%02x%02x%02x", cmd_buf[0], cmd_buf[1], cmd_buf[2], cmd_buf[3]);
+			err = usb_write(bmsc, (char * )cmd_buf, 4, &amount, C_SENDTESTWORK);
+			if (err != LIBUSB_SUCCESS || amount != 4) {
+				applog(LOG_ERR, "Write bootstart Comms error (werr=%d amount=%d)", err, amount);
+				continue;
+			}
+			applog(LOG_ERR, "Send bootstart ok");
+		}
+
+		if(opt_bmsc_voltage) {
+			if(strlen(opt_bmsc_voltage) > 4 || strlen(opt_bmsc_voltage)%2 != 0 || strlen(opt_bmsc_voltage)/2 == 0) {
+				quit(1, "Invalid options for voltage data, must be hex now: %s", opt_bmsc_voltage);
+			}
+			memset(voltage_data, 0, 2);
+			if(!hex2bin(voltage_data, opt_bmsc_voltage, strlen(opt_bmsc_voltage)/2)) {
+				quit(1, "Invalid options for voltage data, hex2bin error now: %s", opt_bmsc_voltage);
+			}
+			cmd_buf[0] = 0xaa;
+			cmd_buf[1] = voltage_data[0];
+			cmd_buf[1] &=0x0f;
+			cmd_buf[1] |=0xb0;
+			cmd_buf[2] = voltage_data[1];
+			cmd_buf[3] = 0x00;  //0-7
+			cmd_buf[3] = CRC5(cmd_buf, 4*8 - 5);
+			cmd_buf[3] |= 0xc0;
+
+			applog(LOG_ERR, "---------------------start voltage----------------------");
+			cgsleep_ms(500);
+			applog(LOG_ERR, "Send voltage %02x%02x%02x%02x", cmd_buf[0], cmd_buf[1], cmd_buf[2], cmd_buf[3]);
+			err = usb_write(bmsc, (char * )cmd_buf, 4, &amount, C_SENDTESTWORK);
+			if (err != LIBUSB_SUCCESS || amount != 4) {
+				applog(LOG_ERR, "Write voltage Comms error (werr=%d amount=%d)", err, amount);
+				continue;
+			}
+			applog(LOG_ERR, "Send voltage ok");
+		}
 
 		if (opt_bmsc_gray) {
 			cmd_buf[0] = 3;
@@ -989,17 +1123,64 @@ cmr2_retry:
 			}
 		}
 
-		cgsleep_ms(500);
+		if (opt_bmsc_bandops) {
+			unsigned char tmpbyte = 0;
+			cmd_buf[0] = core_cmd[0];
+			cmd_buf[1] = core_cmd[1];
+			cmd_buf[2] = core_cmd[2];
+			tmpbyte = core_cmd[3] & 0xE0;
+			cmd_buf[3] = tmpbyte;
+			cmd_buf[3] = CRC5(cmd_buf, 27);
+			cmd_buf[3] |= tmpbyte;
+
+			applog(LOG_ERR, "-----------------start bandops-------------------");
+			applog(LOG_ERR, "SetBandOPS cmd:%02x%02x%02x%02x corenum:%d enable:%s sleep:%d", core_cmd[0], core_cmd[1], core_cmd[2], core_cmd[3], corenum, coreenable, coresleep);
+			cgsleep_ms(500);
+			applog(LOG_ERR, "Send bandops %02x%02x%02x%02x", cmd_buf[0], cmd_buf[1], cmd_buf[2], cmd_buf[3]);
+			err = usb_write_ii(bmsc, info->intinfo, (char * )cmd_buf, 4, &amount, C_SENDWORK);
+			if (err != LIBUSB_SUCCESS || amount != 4) {
+				applog(LOG_ERR, "%s%i: Write BandOPS Comms error (werr=%d amount=%d)", bmsc->drv->name, bmsc->device_id, err, amount);
+				continue;
+			}
+			applog(LOG_DEBUG, "Send bandops command ok");
+			for(i = 0; i < corenum; i++) {
+				if(coreenable[i] == '1') {
+					bandops_ob[127] = '1';
+				} else {
+					bandops_ob[127] = '0';
+				}
+				amount = 0;
+				hex2bin((void *)(&workdata), bandops_ob, sizeof(workdata));
+				applog(LOG_ERR, "Send %d %s", i, bandops_ob);
+				err = usb_write_ii(bmsc, info->intinfo, (char *)(&workdata), sizeof(workdata), &amount, C_SENDWORK);
+				if (err != LIBUSB_SUCCESS || amount != sizeof(workdata)) {
+					applog(LOG_ERR, "%d %s%i: Write BandOPS Enable Comms error (werr=%d amount=%d)", i, bmsc->drv->name, bmsc->device_id, err, amount);
+					break;
+				}
+				if(coresleep > 0) {
+					cgsleep_ms(coresleep);
+				}
+			}
+			if(i >= corenum) {
+				applog(LOG_DEBUG, "Send bandops core enable ok");
+			} else {
+				continue;
+			}
+		}
+		cgsleep_ms(1000);
 
 		applog(LOG_ERR, "-----------------start nonce------------------");
 		applog(LOG_ERR, "Bmsc send golden nonce");
 
+		hex2bin((void *)(&workdata), golden_ob, sizeof(workdata));
 		err = usb_write_ii(bmsc, info->intinfo, (char *)(&workdata), sizeof(workdata), &amount, C_SENDWORK);
 		if (err != LIBUSB_SUCCESS || amount != sizeof(workdata))
 			continue;
 
 		memset(nonce_bin, 0, sizeof(nonce_bin));
 		ret = bmsc_get_nonce(bmsc, nonce_bin, &tv_start, &tv_finish, NULL, 500);
+		
+	//	applog(LOG_ERR, "nonce2 :%02x%02x%02x%02x%02x", nonce_bin[0],nonce_bin[1], nonce_bin[2],nonce_bin[3],nonce_bin[4]);
 		if (ret != BTM_NONCE_OK) {
 			applog(LOG_ERR, "Bmsc recv golden nonce timeout");
 			continue;
@@ -1084,7 +1265,7 @@ cmr2_retry:
 		}
 	}
 
-	applog(LOG_DEBUG, "%s%d: Init baud=%d work_division=%d fpga_count=%d readtimeout=%d",
+	applog(LOG_DEBUG, "%s%d: Init baud=%d work_division=%d fpga_count=%d readtimeout=%f",
 		bmsc->drv->name, bmsc->device_id, baud, work_division, fpga_count, readtimeout);
 
 	info->baud = baud;
@@ -1255,7 +1436,7 @@ static int64_t bmsc_scanwork(struct thr_info *thr)
 	workid = workid & 0x1F;
 
 	// We only want results for the work we are about to send
-	//usb_buffer_clear(bmsc);
+	usb_buffer_clear(bmsc);
 
 	if(info->work_queue[workid]) {
 		free(info->work_queue[workid]);
@@ -1280,6 +1461,8 @@ static int64_t bmsc_scanwork(struct thr_info *thr)
 	/* Bmsc will return 4 bytes (BMSC_READ_SIZE) nonces or nothing */
 	memset(nonce_bin, 0, sizeof(nonce_bin));
 	ret = bmsc_get_nonce(bmsc, nonce_bin, &tv_start, &tv_finish, thr, info->read_time);
+	
+	//applog(LOG_ERR, "nonce :%02x%02x%02x%02x%02x  %d", nonce_bin[0],nonce_bin[1], nonce_bin[2],nonce_bin[3],nonce_bin[4],workid);
 	if (ret == BTM_NONCE_ERROR)
 		goto out;
 
@@ -1309,6 +1492,12 @@ static int64_t bmsc_scanwork(struct thr_info *thr)
 	workid = nonce_bin[4];
 	workid = workid & 0x1F;
 	worktmp = info->work_queue[workid];
+	if(info->start && workid == 0x1f){
+		goto out;
+	}else{
+		info->start = false;
+	}
+	//applog(LOG_ERR, "info->work_queue[workid] %02x: ", workid);
 	if(worktmp) {
 		submitfull = 0;
 		if(submit_nonce_1(thr, worktmp, nonce, &submitfull)) {
@@ -1321,6 +1510,7 @@ static int64_t bmsc_scanwork(struct thr_info *thr)
 				submitnonceok = false;
 			}
 		}
+		cg_logwork(worktmp, nonce_bin, submitnonceok);
 	} else {
 		applog(LOG_ERR, "%s%d: work %02x not find error", bmsc->drv->name, bmsc->device_id, workid);
 	}

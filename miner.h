@@ -506,7 +506,7 @@ struct cgpu_info {
 
 	bool new_work;
 
-	double temp;
+	float temp;
 	int cutofftemp;
 
 	int64_t diff1;
@@ -985,6 +985,14 @@ struct pool;
 #define API_MCAST_CODE "FTW"
 #define API_MCAST_ADDR "224.0.0.75"
 
+extern bool g_logfile_enable;
+extern char g_logfile_path[256];
+extern char g_logfile_openflag[32];
+extern FILE * g_logwork_file;
+extern FILE * g_logwork_files[65];
+extern FILE * g_logwork_diffs[65];
+extern int g_logwork_asicnum;
+
 extern bool opt_work_update;
 extern bool opt_protocol;
 extern bool have_longpoll;
@@ -996,6 +1004,9 @@ extern bool opt_lowmem;
 extern bool opt_autofan;
 extern bool opt_autoengine;
 extern bool use_curses;
+extern char *opt_logwork_path;
+extern char *opt_logwork_asicnum;
+extern bool opt_logwork_diff;
 extern char *opt_api_allow;
 extern bool opt_api_mcast;
 extern char *opt_api_mcast_addr;
@@ -1038,6 +1049,8 @@ extern char *opt_bitmine_a1_options;
 extern char *opt_bitmain_options;
 extern bool opt_bitmain_hwerror;
 extern bool opt_bitmain_checkall;
+extern char *opt_bitmain_freq;
+extern char *opt_bitmain_voltage;
 extern bool opt_bitmain_checkn2diff;
 extern bool opt_bitmain_nobeeper;
 extern bool opt_bitmain_notempoverctrl;
@@ -1046,6 +1059,9 @@ extern bool opt_bitmain_notempoverctrl;
 extern char *opt_bmsc_options;
 extern char *opt_bmsc_timing;
 extern bool opt_bmsc_gray;
+extern char *opt_bmsc_bandops;
+extern char *opt_bmsc_voltage;
+extern bool opt_bmsc_bootstart;
 extern char *opt_bmsc_freq;
 extern char *opt_bmsc_rdreg;
 extern bool opt_bmsc_rdworktest;

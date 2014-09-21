@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2014 Lingchao Xu <lingchao.xu@bitmaintech.com>
+ * Copyright 2012-2013 Lingchao Xu <lingchao.xu@bitmaintech.com>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -38,6 +38,59 @@
 #include "util.h"
 
 #define BITMAIN_CALC_DIFF1	1
+
+#ifdef WIN32
+#define BITMAIN_TEST
+#endif
+
+#define BITMAIN_TEST_PRINT_WORK 0
+#ifdef BITMAIN_TEST
+#define BITMAIN_TEST_NUM 19
+#define BITMAIN_TEST_USENUM 1
+int g_test_index = 0;
+const char btm_work_test_data[BITMAIN_TEST_NUM][256] = {
+		"00000002ddc1ce5579dbec17f17fbb8f31ae218a814b2a0c1900f0d90000000100000000b58aa6ca86546b07a5a46698f736c7ca9c0eedc756d8f28ac33c20cc24d792675276f879190afc85b6888022000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b190000000000000000eb2d45233c5b02de50ddcb9049ba16040e0ba00e9750a474eec75891571d925b52dfda4a190266667145b02f000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b19000000000000000090c7d3743e0b0562e4f56d3dd35cece3c5e8275d0abb21bf7e503cb72bd7ed3b52dfda4a190266667bbb58d7000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b1900000000000000006e0561da06022bfbb42c5ecd74a46bfd91934f201b777e9155cc6c3674724ec652dfda4a19026666a0cd827b000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b1900000000000000000312f42ce4964cc23f2d8c039f106f25ddd58e10a1faed21b3bba4b0e621807b52dfda4a1902666629c9497d000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b19000000000000000033093a6540dbe8f7f3d19e3d2af05585ac58dafad890fa9a942e977334a23d6e52dfda4a190266665ae95079000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b190000000000000000bd7893057d06e69705bddf9a89c7bac6b40c5b32f15e2295fc8c5edf491ea24952dfda4a190266664b89b4d3000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b19000000000000000075e66f533e53837d14236a793ee4e493985642bc39e016b9e63adf14a584a2aa52dfda4a19026666ab5d638d000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b190000000000000000d936f90c5db5f0fe1d017344443854fbf9e40a07a9b7e74fedc8661c23162bff52dfda4a19026666338e79cb000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b190000000000000000d2c1a7d279a4355b017bc0a4b0a9425707786729f21ee18add3fda4252a31a4152dfda4a190266669bc90806000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b190000000000000000ad36d19f33d04ca779942843890bc3b083cec83a4b60b6c45cf7d21fc187746552dfda4a1902666675d81ab7000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b19000000000000000093b809cf82b76082eacb55bc35b79f31882ed0976fd102ef54783cd24341319b52dfda4a1902666642ab4e42000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b1900000000000000007411ff315430a7bbf41de8a685d457e82d5177c05640d6a4436a40f39e99667852dfda4a190266662affa4b5000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b1900000000000000001ad0db5b9e1e2b57c8d3654c160f5a51067521eab7e340a270639d97f00a3fa252dfda4a1902666601a47bb6000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b19000000000000000022e055c442c46bbe16df68603a26891f6e4cf85b90102b39fd7cadb602b4e34552dfda4a1902666695d33cea000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b1900000000000000009c8baf5a8a1e16de2d6ae949d5fec3ed751f10dcd4c99810f2ce08040fb9e31d52dfda4a19026666fe78849d000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b190000000000000000e5655532b414887f35eb4652bc7b11ebac12891f65bc08cbe0ce5b277b9e795152dfda4a19026666fcc0d1d1000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b190000000000000000f272c5508704e2b62dd1c30ea970372c40bf00f9203f9bf69d456b4a7fbfffe352dfda4a19026666c03d4399000000800000000000000000000000000000000000000000000000000000000000000000",
+		"0000000256ccc4c8aeae2b1e41490bc352893605f284e4be043f7b190000000000000000fca3b4531ba627ad9b0e23cdd84c888952c23810df196e9c6db0bcecba6a830952dfda4a19026666c14009cb000000800000000000000000000000000000000000000000000000000000000000000000"
+};
+const char btm_work_test_midstate[BITMAIN_TEST_NUM][256] = {
+		"2d8738e7f5bcf76dcb8316fec772e20e240cd58c88d47f2d3f5a6a9547ed0a35",
+		"d31b6ce09c0bfc2af6f3fe3a03475ebefa5aa191fa70a327a354b2c22f9692f1",
+		"84a8c8224b80d36caeb42eff2a100f634e1ff873e83fd02ef1306a34abef9dbe",
+		"059882159439b9b32968c79a93c5521e769dbea9d840f56c2a17b9ad87e530b8",
+		"17fa435d05012574f8f1da26994cc87b6cb9660b5e82072dc6a0881cec150a0d",
+		"92a28cc5ec4ba6a2688471dfe2032b5fe97c805ca286c503e447d6749796c6af",
+		"1677a03516d6e9509ac37e273d2482da9af6e077abe8392cdca6a30e916a7ae9",
+		"50bbe09f1b8ac18c97aeb745d5d2c3b5d669b6ac7803e646f65ac7b763a392d1",
+		"e46a0022ebdc303a7fb1a0ebfa82b523946c312e745e5b8a116b17ae6b4ce981",
+		"8f2f61e7f5b4d76d854e6d266acfff4d40347548216838ccc4ef3b9e43d3c9ea",
+		"0a450588ae99f75d676a08d0326e1ea874a3497f696722c78a80c7b6ee961ea6",
+		"3c4c0fc2cf040b806c51b46de9ec0dcc678a7cc5cf3eff11c6c03de3bc7818cc",
+		"f6c7c785ab5daddb8f98e5f854f2cb41879fcaf47289eb2b4196fefc1b28316f",
+		"005312351ccb0d0794779f5023e4335b5cad221accf0dfa3da7b881266fa9f5a",
+		"7b26d189c6bba7add54143179aadbba7ccaeff6887bd8d5bec9597d5716126e6",
+		"a4718f4c801e7ddf913a9474eb71774993525684ffea1915f767ab16e05e6889",
+		"6b6226a8c18919d0e55684638d33a6892a00d22492cc2f5906ca7a4ac21c74a7",
+		"383114dccd1cb824b869158aa2984d157fcb02f46234ceca65943e919329e697",
+		"d4d478df3016852b27cb1ae9e1e98d98617f8d0943bf9dc1217f47f817236222"
+};
+#endif
 
 char opt_bitmain_dev[256] = {0};
 bool opt_bitmain_hwerror = false;
@@ -125,19 +178,49 @@ static uint16_t CRC16(const uint8_t* p_data, uint16_t w_len)
 	return ((chCRCHi << 8) | chCRCLo);
 }
 
-static uint32_t num2bit(int num)
-{
-	if (num < 0 || num > 31)
-		return 0;
-	else
-		return (((uint32_t)1) << (31 - num));
+static uint32_t num2bit(int num) {
+	switch(num) {
+	case 0:  return 0x80000000;
+	case 1:  return 0x40000000;
+	case 2:  return 0x20000000;
+	case 3:  return 0x10000000;
+	case 4:  return 0x08000000;
+	case 5:  return 0x04000000;
+	case 6:  return 0x02000000;
+	case 7:  return 0x01000000;
+	case 8:  return 0x00800000;
+	case 9:  return 0x00400000;
+	case 10: return 0x00200000;
+	case 11: return 0x00100000;
+	case 12: return 0x00080000;
+	case 13: return 0x00040000;
+	case 14: return 0x00020000;
+	case 15: return 0x00010000;
+	case 16: return 0x00008000;
+	case 17: return 0x00004000;
+	case 18: return 0x00002000;
+	case 19: return 0x00001000;
+	case 20: return 0x00000800;
+	case 21: return 0x00000400;
+	case 22: return 0x00000200;
+	case 23: return 0x00000100;
+	case 24: return 0x00000080;
+	case 25: return 0x00000040;
+	case 26: return 0x00000020;
+	case 27: return 0x00000010;
+	case 28: return 0x00000008;
+	case 29: return 0x00000004;
+	case 30: return 0x00000002;
+	case 31: return 0x00000001;
+	default: return 0x00000000;
+	}
 }
 
 static bool get_options(int this_option_offset, int *baud, int *chain_num,
-			int *asic_num, int *timeout, int *frequency, char * frequency_t, uint8_t * reg_data)
+			int *asic_num, int *timeout, int *frequency, char * frequency_t, uint8_t * reg_data, uint8_t * voltage, char * voltage_t)
 {
 	char buf[BUFSIZ+1];
-	char *ptr, *comma, *colon, *colon2, *colon3, *colon4, *colon5;
+	char *ptr, *comma, *colon, *colon2, *colon3, *colon4, *colon5, *colon6;
 	size_t max;
 	int i, tmp;
 
@@ -247,6 +330,10 @@ static bool get_options(int this_option_offset, int *baud, int *chain_num,
 						strcpy(frequency_t, colon4);
 					}
 					if (colon5 && *colon5) {
+						colon6 = strchr(colon5, ':');
+						if(colon6)
+							*(colon6++) = '\0';
+
 						if(strlen(colon5) > 8 || strlen(colon5)%2 != 0 || strlen(colon5)/2 == 0) {
 							quit(1, "Invalid bitmain-options for reg data, must be hex now: %s",
 									colon5);
@@ -256,9 +343,120 @@ static bool get_options(int this_option_offset, int *baud, int *chain_num,
 							quit(1, "Invalid bitmain-options for reg data, hex2bin error now: %s",
 									colon5);
 						}
+
+						if (colon6 && *colon6) {
+							if(strlen(colon6) > 4 || strlen(colon6)%2 != 0 || strlen(colon6)/2 == 0) {
+								quit(1, "Invalid bitmain-options for voltage data, must be hex now: %s",
+									colon6);
+							}
+							memset(voltage, 0, 2);
+							if(!hex2bin(voltage, colon6, strlen(colon6)/2)) {
+								quit(1, "Invalid bitmain-options for voltage data, hex2bin error now: %s",
+									colon5);
+							} else {
+								sprintf(voltage_t, "%02x%02x", voltage[0], voltage[1]);
+								voltage_t[5] = 0;
+								voltage_t[4] = voltage_t[3];
+								voltage_t[3] = voltage_t[2];
+								voltage_t[2] = voltage_t[1];
+								voltage_t[1] = '.';
+							}
+						}
 					}
 				}
 			}
+		}
+	}
+	return true;
+}
+
+static bool get_option_freq(int *timeout, int *frequency, char * frequency_t, uint8_t * reg_data)
+{
+	char buf[BUFSIZ+1];
+	char *ptr, *comma, *colon, *colon2;
+	size_t max;
+	int i, tmp;
+
+	if (opt_bitmain_freq == NULL)
+		return true;
+	else {
+		ptr = opt_bitmain_freq;
+
+		comma = strchr(ptr, ',');
+		if (comma == NULL)
+			max = strlen(ptr);
+		else
+			max = comma - ptr;
+
+		if (max > BUFSIZ)
+			max = BUFSIZ;
+		strncpy(buf, ptr, max);
+		buf[max] = '\0';
+	}
+
+	if (!(*buf))
+		return false;
+
+	colon = strchr(buf, ':');
+	if (colon)
+		*(colon++) = '\0';
+
+	tmp = atoi(buf);
+	if (tmp > 0 && tmp <= 0xff)
+		*timeout = tmp;
+	else {
+		quit(1, "Invalid bitmain-freq for "
+			"timeout (%s) must be 1 ~ %d",
+			buf, 0xff);
+	}
+
+	if (colon && *colon) {
+		colon2 = strchr(colon, ':');
+		if (colon2)
+			*(colon2++) = '\0';
+
+		tmp = atoi(colon);
+		if (tmp < BITMAIN_MIN_FREQUENCY || tmp > BITMAIN_MAX_FREQUENCY) {
+			quit(1, "Invalid bitmain-freq for frequency, must be %d <= frequency <= %d",
+					BITMAIN_MIN_FREQUENCY, BITMAIN_MAX_FREQUENCY);
+		} else {
+			*frequency = tmp;
+			strcpy(frequency_t, colon);
+		}
+
+		if (colon2 && *colon2) {
+			if(strlen(colon2) > 8 || strlen(colon2)%2 != 0 || strlen(colon2)/2 == 0) {
+				quit(1, "Invalid bitmain-freq for reg data, must be hex now: %s",
+						colon2);
+			}
+			memset(reg_data, 0, 4);
+			if(!hex2bin(reg_data, colon2, strlen(colon2)/2)) {
+				quit(1, "Invalid bitmain-freq for reg data, hex2bin error now: %s",
+						colon2);
+			}
+		}
+	}
+	return true;
+}
+
+static bool get_option_voltage(uint8_t * voltage, char * voltage_t)
+{
+	if(opt_bitmain_voltage) {
+		if(strlen(opt_bitmain_voltage) > 4 || strlen(opt_bitmain_voltage)%2 != 0 || strlen(opt_bitmain_voltage)/2 == 0) {
+			quit(1, "Invalid bitmain-voltage for voltage data, must be hex now: %s",
+					opt_bitmain_voltage);
+		}
+		memset(voltage, 0, 2);
+		if(!hex2bin(voltage, opt_bitmain_voltage, strlen(opt_bitmain_voltage)/2)) {
+			quit(1, "Invalid bitmain-voltage for voltage data, hex2bin error now: %s",
+					opt_bitmain_voltage);
+		} else {
+			sprintf(voltage_t, "%02x%02x", voltage[0], voltage[1]);
+			voltage_t[5] = 0;
+			voltage_t[4] = voltage_t[3];
+			voltage_t[3] = voltage_t[2];
+			voltage_t[2] = voltage_t[1];
+			voltage_t[1] = '.';
 		}
 	}
 	return true;
@@ -269,7 +467,7 @@ static int bitmain_set_txconfig(struct bitmain_txconfig_token *bm,
 			    uint8_t voltage_eft, uint8_t chain_check_time_eft, uint8_t chip_config_eft, uint8_t hw_error_eft,
 			    uint8_t beeper_ctrl, uint8_t temp_over_ctrl,
 			    uint8_t chain_num, uint8_t asic_num, uint8_t fan_pwm_data, uint8_t timeout_data,
-			    uint16_t frequency, uint8_t voltage, uint8_t chain_check_time,
+			    uint16_t frequency, uint8_t * voltage, uint8_t chain_check_time,
 			    uint8_t chip_address, uint8_t reg_address, uint8_t * reg_data)
 {
 	uint16_t crc = 0;
@@ -315,7 +513,7 @@ static int bitmain_set_txconfig(struct bitmain_txconfig_token *bm,
 	bm->timeout_data = timeout_data;
 
 	bm->frequency = htole16(frequency);
-	bm->voltage = voltage;
+	memcpy(bm->voltage, voltage, 2);
 	bm->chain_check_time = chain_check_time;
 
 	memcpy(bm->reg_data, reg_data, 4);
@@ -325,10 +523,10 @@ static int bitmain_set_txconfig(struct bitmain_txconfig_token *bm,
 	crc = CRC16((uint8_t *)bm, datalen-2);
 	bm->crc = htole16(crc);
 
-	applog(LOG_ERR, "BTM TxConfigToken:v(%d) reset(%d) fan_e(%d) tout_e(%d) fq_e(%d) vt_e(%d) chainc_e(%d) chipc_e(%d) hw_e(%d) b_c(%d) t_c(%d) mnum(%d) anum(%d) fanpwmdata(%d) toutdata(%d) freq(%d) volt(%d) chainctime(%d) regdata(%02x%02x%02x%02x) chipaddr(%02x) regaddr(%02x) crc(%04x)",
+	applog(LOG_ERR, "BTM TxConfigToken:v(%d) reset(%d) fan_e(%d) tout_e(%d) fq_e(%d) vt_e(%d) chainc_e(%d) chipc_e(%d) hw_e(%d) b_c(%d) t_c(%d) mnum(%d) anum(%d) fanpwmdata(%d) toutdata(%d) freq(%d) volt(%02x%02x) chainctime(%d) regdata(%02x%02x%02x%02x) chipaddr(%02x) regaddr(%02x) crc(%04x)",
 					version, reset, fan_eft, timeout_eft, frequency_eft, voltage_eft,
 					chain_check_time_eft, chip_config_eft, hw_error_eft, beeper_ctrl, temp_over_ctrl, chain_num, asic_num,
-					fan_pwm_data, timeout_data, frequency, voltage,
+					fan_pwm_data, timeout_data, frequency, voltage[0], voltage[1],
 					chain_check_time, reg_data[0], reg_data[1], reg_data[2], reg_data[3], chip_address, reg_address, crc);
 
 	return datalen;
@@ -376,6 +574,19 @@ static int bitmain_set_txtask(uint8_t * sendbuf,
 				new_block = 1;
 				*last_work_block = works[index]->work_block;
 			}
+#ifdef BITMAIN_TEST
+			if(!hex2bin(works[index]->data, btm_work_test_data[g_test_index], 128)) {
+				applog(LOG_DEBUG, "BTM send task set test data error");
+			}
+			if(!hex2bin(works[index]->midstate, btm_work_test_midstate[g_test_index], 32)) {
+				applog(LOG_DEBUG, "BTM send task set test midstate error");
+			}
+			g_test_index++;
+			if(g_test_index >= BITMAIN_TEST_USENUM) {
+				g_test_index = 0;
+			}
+			applog(LOG_DEBUG, "BTM test index = %d", g_test_index);
+#endif
 			work_id = works[index]->id;
 			bm->works[cursendcount].work_id = htole32(work_id);
 			applog(LOG_DEBUG, "BTM send task work id:%d %d", bm->works[cursendcount].work_id, work_id);
@@ -396,6 +607,12 @@ static int bitmain_set_txtask(uint8_t * sendbuf,
 						break;
 					}
 				}
+			}
+
+			if(BITMAIN_TEST_PRINT_WORK) {
+				ob_hex = bin2hex(works[index]->data, 76);
+				applog(LOG_ERR, "work %d data: %s", works[index]->id, ob_hex);
+				free(ob_hex);
 			}
 
 			cursendcount++;
@@ -796,7 +1013,7 @@ static void bitmain_inc_nvw(struct bitmain_info *info, struct thr_info *thr)
 	info->no_matching_work++;
 }
 
-static inline void record_temp_fan(struct bitmain_info *info, struct bitmain_rxstatus_data *bm, double *temp_avg)
+static inline void record_temp_fan(struct bitmain_info *info, struct bitmain_rxstatus_data *bm, float *temp_avg)
 {
 	int i = 0;
 	int maxfan = 0, maxtemp = 0;
@@ -942,26 +1159,72 @@ static void bitmain_parse_results(struct cgpu_info *bitmain, struct bitmain_info
 						}
 					}
 					if(asicnum > 0) {
-						for(m = asicnum-1; m >= 0; m--) {
-							for(r = mod; r < 32; r++) {
-								if((r-mod)%8 == 0 && (r-mod) != 0) {
+						if(info->chain_asic_num[n] < 32 || mod == 0) {
+							for(m = asicnum-1; m >= 0; m--) {
+								for(r = (32-mod); r < 32; r++) {
+									if((r-mod)%8 == 0 && (r-mod) != 0) {
+										info->chain_asic_status_t[n][j] = ' ';
+										j++;
+									}
+									checkbit = num2bit(r);
+									if(rxstatusdata.chain_asic_exist[n*8+m] & checkbit) {
+										if(rxstatusdata.chain_asic_status[n*8+m] & checkbit) {
+											info->chain_asic_status_t[n][j] = 'o';
+										} else {
+											info->chain_asic_status_t[n][j] = 'x';
+										}
+									} else {
+										info->chain_asic_status_t[n][j] = '-';
+									}
+									j++;
+								}
+								info->chain_asic_status_t[n][j] = ' ';
+								j++;
+							}
+						} else {
+							for(m = asicnum-1; m >= 0; m--) {
+								if(m == asicnum-1) {
+									for(r = (32-mod); r < 32; r++) {
+										if((r-mod)%8 == 0 && (r-mod) != 0) {
+											info->chain_asic_status_t[n][j] = ' ';
+											j++;
+										}
+										checkbit = num2bit(r);
+										if(rxstatusdata.chain_asic_exist[n*8+m] & checkbit) {
+											if(rxstatusdata.chain_asic_status[n*8+m] & checkbit) {
+												info->chain_asic_status_t[n][j] = 'o';
+											} else {
+												info->chain_asic_status_t[n][j] = 'x';
+											}
+										} else {
+											info->chain_asic_status_t[n][j] = '-';
+										}
+										j++;
+									}
+									info->chain_asic_status_t[n][j] = ' ';
+									j++;
+								} else {
+									for(r = 0; r < 32; r++) {
+										if(r%8 == 0 && r != 0) {
+											info->chain_asic_status_t[n][j] = ' ';
+											j++;
+										}
+										checkbit = num2bit(r);
+										if(rxstatusdata.chain_asic_exist[n*8+m] & checkbit) {
+											if(rxstatusdata.chain_asic_status[n*8+m] & checkbit) {
+												info->chain_asic_status_t[n][j] = 'o';
+											} else {
+												info->chain_asic_status_t[n][j] = 'x';
+											}
+										} else {
+											info->chain_asic_status_t[n][j] = '-';
+										}
+										j++;
+									}
 									info->chain_asic_status_t[n][j] = ' ';
 									j++;
 								}
-								checkbit = num2bit(r);
-								if(rxstatusdata.chain_asic_exist[n*8+m] & checkbit) {
-									if(rxstatusdata.chain_asic_status[n*8+m] & checkbit) {
-										info->chain_asic_status_t[n][j] = 'o';
-									} else {
-										info->chain_asic_status_t[n][j] = 'x';
-									}
-								} else {
-									info->chain_asic_status_t[n][j] = '-';
-								}
-								j++;
 							}
-							info->chain_asic_status_t[n][j] = ' ';
-							j++;
 						}
 					}
 					applog(LOG_DEBUG, "bitmain_parse_results chain(%d) asic_num=%d asic_exist=%08x%08x%08x%08x%08x%08x%08x%08x asic_status=%08x%08x%08x%08x%08x%08x%08x%08x",
@@ -1014,10 +1277,23 @@ static void bitmain_parse_results(struct cgpu_info *bitmain, struct bitmain_info
 					work = clone_queued_work_byid(bitmain, rxnoncedata.nonces[j].work_id);
 					if(work) {
 						pool = work->pool;
+						if(BITMAIN_TEST_PRINT_WORK) {
+							applog(LOG_ERR, "bitmain_parse_results nonce find work(%d-%d)(%08x)", work->id, rxnoncedata.nonces[j].work_id, rxnoncedata.nonces[j].nonce);
+
+							ob_hex = bin2hex(work->midstate, 32);
+							applog(LOG_ERR, "work %d midstate: %s", work->id, ob_hex);
+							free(ob_hex);
+
+							ob_hex = bin2hex(work->data+64, 12);
+							applog(LOG_ERR, "work %d data2: %s", work->id, ob_hex);
+							free(ob_hex);
+						}
+
 						if(work->work_block < info->last_work_block) {
 							applog(LOG_ERR, "BitMain: bitmain_parse_rxnonce work(%d) nonce stale", rxnoncedata.nonces[j].work_id);
 						} else {
 							if (bitmain_decode_nonce(thr, bitmain, info, rxnoncedata.nonces[j].nonce, work)) {
+								cg_logwork_uint32(work, rxnoncedata.nonces[j].nonce, true);
 								if(opt_bitmain_hwerror) {
 #ifndef BITMAIN_CALC_DIFF1
 									mutex_lock(&info->qlock);
@@ -1343,26 +1619,73 @@ static int bitmain_initialize(struct cgpu_info *bitmain)
 								}
 							}
 							if(asicnum > 0) {
-								for(m = asicnum-1; m >= 0; m--) {
-									for(r = mod; r < 32; r++) {
-										if((r-mod)%8 == 0 && (r-mod) != 0) {
+								if(info->chain_asic_num[i] < 32 || mod == 0) {
+									for(m = asicnum-1; m >= 0; m--) {
+										for(r = (32-mod); r < 32; r++) {
+											if((r-mod)%8 == 0 && (r-mod) != 0) {
+												info->chain_asic_status_t[i][j] = ' ';
+												j++;
+											}
+											checkbit = num2bit(r);
+											if(rxstatusdata.chain_asic_exist[i*8+m] & checkbit) {
+												if(rxstatusdata.chain_asic_status[i*8+m] & checkbit) {
+													info->chain_asic_status_t[i][j] = 'o';
+												} else {
+													info->chain_asic_status_t[i][j] = 'x';
+												}
+											} else {
+												info->chain_asic_status_t[i][j] = '-';
+											}
+											j++;
+										}
+										info->chain_asic_status_t[i][j] = ' ';
+										j++;
+									}
+								} else {
+									for(m = asicnum-1; m >= 0; m--) {
+										if(m == asicnum-1) {
+											for(r = (32-mod); r < 32; r++) {
+												if((r-mod)%8 == 0 && (r-mod) != 0) {
+													info->chain_asic_status_t[i][j] = ' ';
+													j++;
+												}
+
+												checkbit = num2bit(r);
+												if(rxstatusdata.chain_asic_exist[i*8+m] & checkbit) {
+													if(rxstatusdata.chain_asic_status[i*8+m] & checkbit) {
+														info->chain_asic_status_t[i][j] = 'o';
+													} else {
+														info->chain_asic_status_t[i][j] = 'x';
+													}
+												} else {
+													info->chain_asic_status_t[i][j] = '-';
+												}
+												j++;
+											}
+											info->chain_asic_status_t[i][j] = ' ';
+											j++;
+										} else {
+											for(r = 0; r < 32; r++) {
+												if(r%8 == 0 && r != 0) {
+													info->chain_asic_status_t[i][j] = ' ';
+													j++;
+												}
+												checkbit = num2bit(r);
+												if(rxstatusdata.chain_asic_exist[i*8+m] & checkbit) {
+													if(rxstatusdata.chain_asic_status[i*8+m] & checkbit) {
+														info->chain_asic_status_t[i][j] = 'o';
+													} else {
+														info->chain_asic_status_t[i][j] = 'x';
+													}
+												} else {
+													info->chain_asic_status_t[i][j] = '-';
+												}
+												j++;
+											}
 											info->chain_asic_status_t[i][j] = ' ';
 											j++;
 										}
-										checkbit = num2bit(r);
-										if(rxstatusdata.chain_asic_exist[i*8+m] & checkbit) {
-											if(rxstatusdata.chain_asic_status[i*8+m] & checkbit) {
-												info->chain_asic_status_t[i][j] = 'o';
-											} else {
-												info->chain_asic_status_t[i][j] = 'x';
-											}
-										} else {
-											info->chain_asic_status_t[i][j] = '-';
-										}
-										j++;
 									}
-									info->chain_asic_status_t[i][j] = ' ';
-									j++;
 								}
 							}
 							applog(LOG_DEBUG, "bitmain_initialize chain(%d) asic_num=%d asic_exist=%08x%08x%08x%08x%08x%08x%08x%08x asic_status=%08x%08x%08x%08x%08x%08x%08x%08x",
@@ -1409,7 +1732,7 @@ static int bitmain_initialize(struct cgpu_info *bitmain)
 			tempover_ctrl = 1;
 		sendlen = bitmain_set_txconfig((struct bitmain_txconfig_token *)sendbuf, 1, 1, 1, 1, 1, 0, 1, hwerror_eft, beeper_ctrl, tempover_ctrl,
 				info->chain_num, info->asic_num, BITMAIN_DEFAULT_FAN_MAX_PWM, info->timeout,
-				info->frequency, BITMAIN_DEFAULT_VOLTAGE, 0, 0, 0x04, info->reg_data);
+				info->frequency, info->voltage, 0, 0, 0x04, info->reg_data);
 		if(sendlen <= 0) {
 			applog(LOG_ERR, "bitmain_initialize bitmain_set_txconfig error(%d)", sendlen);
 			return -1;
@@ -1526,6 +1849,8 @@ static struct cgpu_info * bitmain_usb_detect_one(libusb_device *dev, struct usb_
 	int baud, chain_num, asic_num, timeout, frequency = 0;
 	char frequency_t[256] = {0};
 	uint8_t reg_data[4] = {0};
+	uint8_t voltage[2] = {0};
+	char voltage_t[8] = {0};
 	int this_option_offset = ++option_offset;
 	struct bitmain_info *info;
 	struct cgpu_info *bitmain;
@@ -1547,7 +1872,9 @@ static struct cgpu_info * bitmain_usb_detect_one(libusb_device *dev, struct usb_
 		goto shin;
 
 	configured = get_options(this_option_offset, &baud, &chain_num,
-				 &asic_num, &timeout, &frequency, frequency_t, reg_data);
+				 &asic_num, &timeout, &frequency, frequency_t, reg_data, voltage, voltage_t);
+	get_option_freq(&timeout, &frequency, frequency_t, reg_data);
+	get_option_voltage(voltage, voltage_t);
 
 	/* Even though this is an FTDI type chip, we want to do the parsing
 	 * all ourselves so set it to std usb type */
@@ -1569,6 +1896,8 @@ static struct cgpu_info * bitmain_usb_detect_one(libusb_device *dev, struct usb_
 		info->frequency = frequency;
 		strcpy(info->frequency_t, frequency_t);
 		memcpy(info->reg_data, reg_data, 4);
+		memcpy(info->voltage, voltage, 2);
+		strcpy(info->voltage_t, voltage_t);
 	} else {
 		info->baud = BITMAIN_IO_SPEED;
 		info->chain_num = BITMAIN_DEFAULT_CHAIN_NUM;
@@ -1577,8 +1906,10 @@ static struct cgpu_info * bitmain_usb_detect_one(libusb_device *dev, struct usb_
 		info->frequency = BITMAIN_DEFAULT_FREQUENCY;
 		sprintf(info->frequency_t, "%d", BITMAIN_DEFAULT_FREQUENCY);
 		memset(info->reg_data, 0, 4);
+		info->voltage[0] = BITMAIN_DEFAULT_VOLTAGE0;
+		info->voltage[1] = BITMAIN_DEFAULT_VOLTAGE1;
+		strcpy(info->voltage_t, BITMAIN_DEFAULT_VOLTAGE_T);
 	}
-	info->voltage = BITMAIN_DEFAULT_VOLTAGE;
 
 	info->fan_pwm = BITMAIN_DEFAULT_FAN_MIN_PWM;
 	info->temp_max = 0;
@@ -1629,6 +1960,8 @@ static bool bitmain_detect_one(const char * devpath)
 	int baud, chain_num, asic_num, timeout, frequency = 0;
 	char frequency_t[256] = {0};
 	uint8_t reg_data[4] = {0};
+	uint8_t voltage[2] = {0};
+	char voltage_t[8] = {0};
 	int this_option_offset = ++option_offset;
 	struct bitmain_info *info;
 	struct cgpu_info *bitmain;
@@ -1641,7 +1974,9 @@ static bool bitmain_detect_one(const char * devpath)
 	bitmain = btm_alloc_cgpu(&bitmain_drv, BITMAIN_MINER_THREADS);
 
 	configured = get_options(this_option_offset, &baud, &chain_num,
-				 &asic_num, &timeout, &frequency, frequency_t, reg_data);
+				 &asic_num, &timeout, &frequency, frequency_t, reg_data, voltage, voltage_t);
+	get_option_freq(&timeout, &frequency, frequency_t, reg_data);
+	get_option_voltage(voltage, voltage_t);
 
 	if (!btm_init(bitmain, opt_bitmain_dev))
 		goto shin;
@@ -1660,6 +1995,8 @@ static bool bitmain_detect_one(const char * devpath)
 		info->frequency = frequency;
 		strcpy(info->frequency_t, frequency_t);
 		memcpy(info->reg_data, reg_data, 4);
+		memcpy(info->voltage, voltage, 2);
+		strcpy(info->voltage_t, voltage_t);
 	} else {
 		info->baud = BITMAIN_IO_SPEED;
 		info->chain_num = BITMAIN_DEFAULT_CHAIN_NUM;
@@ -1668,8 +2005,10 @@ static bool bitmain_detect_one(const char * devpath)
 		info->frequency = BITMAIN_DEFAULT_FREQUENCY;
 		sprintf(info->frequency_t, "%d", BITMAIN_DEFAULT_FREQUENCY);
 		memset(info->reg_data, 0, 4);
+		info->voltage[0] = BITMAIN_DEFAULT_VOLTAGE0;
+		info->voltage[1] = BITMAIN_DEFAULT_VOLTAGE1;
+		strcpy(info->voltage_t, BITMAIN_DEFAULT_VOLTAGE_T);
 	}
-	info->voltage = BITMAIN_DEFAULT_VOLTAGE;
 
 	info->fan_pwm = BITMAIN_DEFAULT_FAN_MIN_PWM;
 	info->temp_max = 0;
@@ -1692,10 +2031,10 @@ static bool bitmain_detect_one(const char * devpath)
 
 	info->errorcount = 0;
 
-	applog(LOG_DEBUG, "BitMain Detected: %s "
-	       "(chain_num=%d asic_num=%d timeout=%d frequency=%d)",
+	applog(LOG_ERR, "BitMain Detected: %s "
+	       "(chain_num=%d asic_num=%d timeout=%d freq=%d-%s volt=%02x%02x-%s)",
 	       bitmain->device_path, info->chain_num, info->asic_num, info->timeout,
-	       info->frequency);
+	       info->frequency, info->frequency_t, info->voltage[0], info->voltage[1], info->voltage_t);
 
 	return true;
 
@@ -1989,7 +2328,7 @@ static struct api_data *bitmain_api_stats(struct cgpu_info *cgpu)
 	root = api_add_int(root, "asic_count", &(info->asic_num), false);
 	root = api_add_int(root, "timeout", &(info->timeout), false);
 	root = api_add_string(root, "frequency", info->frequency_t, false);
-	root = api_add_int(root, "voltage", &(info->voltage), false);
+	root = api_add_string(root, "voltage", info->voltage_t, false);
 	root = api_add_int(root, "hwv1", &(info->hw_version[0]), false);
 	root = api_add_int(root, "hwv2", &(info->hw_version[1]), false);
 	root = api_add_int(root, "hwv3", &(info->hw_version[2]), false);
