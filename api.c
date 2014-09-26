@@ -133,7 +133,7 @@ static const char SEPARATOR = '|';
 #define JOIN_CMD "CMD="
 #define BETWEEN_JOIN SEPSTR
 
-static const char *APIVERSION = "3.4";
+static const char *APIVERSION = "3.1";
 static const char *DEAD = "Dead";
 static const char *SICK = "Sick";
 static const char *NOSTART = "NoStart";
@@ -2603,6 +2603,7 @@ static void lcddisplay(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __m
 	struct api_data *root = NULL;
 	bool io_open = false;
 	char *status, *lp;
+	double ghs;
 
 	char szindex[32] = {0};
 	char szfan[32] = {0};
@@ -2617,10 +2618,13 @@ static void lcddisplay(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __m
 	if (isjson)
 		io_open = io_add(io_data, COMSTR JSON_POOLS);
 
+	ghs = total_mhashes_done / 1000 / total_secs;
+
 	strcpy(szindex, "0");
 	root = api_add_string(root, "LCD", szindex, false);
 
-	root = api_add_mhs(root, "GHS", &(g_displayed_rolling), false);
+	root = api_add_mhs(root, "GHS5s", &(g_displayed_rolling), false);
+	root = api_add_mhs(root, "GHSavg", &(ghs), false);
 
 	sprintf(szfan, "%d", g_max_fan);
 	root = api_add_string(root, "fan", szfan, false);
@@ -2636,6 +2640,7 @@ static void lcddisplay(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __m
 		root = api_add_string(root, "pool", pool->rpc_url, false);
 		root = api_add_string(root, "user", pool->rpc_user, false);
 	}
+
 	root = print_data(io_data, root, isjson, isjson);
 
 	if (isjson && io_open)

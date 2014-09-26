@@ -1179,8 +1179,6 @@ cmr2_retry:
 
 		memset(nonce_bin, 0, sizeof(nonce_bin));
 		ret = bmsc_get_nonce(bmsc, nonce_bin, &tv_start, &tv_finish, NULL, 500);
-		
-	//	applog(LOG_ERR, "nonce2 :%02x%02x%02x%02x%02x", nonce_bin[0],nonce_bin[1], nonce_bin[2],nonce_bin[3],nonce_bin[4]);
 		if (ret != BTM_NONCE_OK) {
 			applog(LOG_ERR, "Bmsc recv golden nonce timeout");
 			continue;
@@ -1461,8 +1459,6 @@ static int64_t bmsc_scanwork(struct thr_info *thr)
 	/* Bmsc will return 4 bytes (BMSC_READ_SIZE) nonces or nothing */
 	memset(nonce_bin, 0, sizeof(nonce_bin));
 	ret = bmsc_get_nonce(bmsc, nonce_bin, &tv_start, &tv_finish, thr, info->read_time);
-	
-	//applog(LOG_ERR, "nonce :%02x%02x%02x%02x%02x  %d", nonce_bin[0],nonce_bin[1], nonce_bin[2],nonce_bin[3],nonce_bin[4],workid);
 	if (ret == BTM_NONCE_ERROR)
 		goto out;
 
@@ -1497,7 +1493,6 @@ static int64_t bmsc_scanwork(struct thr_info *thr)
 	}else{
 		info->start = false;
 	}
-	//applog(LOG_ERR, "info->work_queue[workid] %02x: ", workid);
 	if(worktmp) {
 		submitfull = 0;
 		if(submit_nonce_1(thr, worktmp, nonce, &submitfull)) {

@@ -186,10 +186,6 @@ static int most_devices;
 struct cgpu_info **devices;
 int mining_threads;
 int num_processors;
-char work_proxy_ip[256] = {0};
-unsigned short work_proxy_port = 9876;
-int work_proxy_socket = -1;
-char work_proxy_jobid[256] = {0};
 
 #ifdef HAVE_CURSES
 bool use_curses = true;
@@ -262,20 +258,19 @@ char *opt_bitmine_a1_options = NULL;
 #endif
 #ifdef USE_BMSC
 char *opt_bmsc_options = NULL;
-char *opt_bmsc_timing = NULL;
 char *opt_bmsc_bandops = NULL;
-char *opt_bmsc_voltage = NULL;
-bool opt_bmsc_bootstart = false;
+char *opt_bmsc_timing = NULL;
 bool opt_bmsc_gray = false;
 char *opt_bmsc_freq = NULL;
 char *opt_bmsc_rdreg = NULL;
+char *opt_bmsc_voltage = NULL;
+bool opt_bmsc_bootstart = false;
 bool opt_bmsc_rdworktest = false;
 #endif
 #ifdef USE_BITMAIN
 char *opt_bitmain_options = NULL;
-char *opt_bitmain_voltage = NULL;
 char *opt_bitmain_freq = NULL;
-
+char *opt_bitmain_voltage = NULL;
 #endif
 #ifdef USE_HASHFAST
 static char *opt_set_hfa_fan;
@@ -426,7 +421,6 @@ struct block {
 };
 
 static struct block *blocks = NULL;
-
 
 int swork_id;
 
@@ -1141,15 +1135,6 @@ static void load_temp_cutoffs()
 	}
 }
 
-static char *set_work_proxy(const char *arg)
-{
-	opt_set_charp(arg, &opt_work_proxy);
-
-	return NULL;
-}
-
-
-
 static char *set_logfile_path(const char *arg)
 {
 	opt_set_charp(arg, &opt_logfile_path);
@@ -1177,6 +1162,7 @@ static char *set_logwork_asicnum(const char *arg)
 
 	return NULL;
 }
+
 static char *set_float_125_to_500(const char *arg, float *i)
 {
 	char *err = opt_set_floatval(arg, i);
@@ -1205,21 +1191,16 @@ static char *set_bmsc_options(const char *arg)
 	return NULL;
 }
 
-static char *set_bmsc_timing(const char *arg)
-{
-	opt_set_charp(arg, &opt_bmsc_timing);
-
-	return NULL;
-}
 static char *set_bmsc_bandops(const char *arg)
 {
 	opt_set_charp(arg, &opt_bmsc_bandops);
 
 	return NULL;
 }
-static char *set_bmsc_voltage(const char *arg)
+
+static char *set_bmsc_timing(const char *arg)
 {
-	opt_set_charp(arg, &opt_bmsc_voltage);
+	opt_set_charp(arg, &opt_bmsc_timing);
 
 	return NULL;
 }
@@ -1237,6 +1218,13 @@ static char *set_bmsc_rdreg(const char *arg)
 
 	return NULL;
 }
+
+static char *set_bmsc_voltage(const char *arg)
+{
+	opt_set_charp(arg, &opt_bmsc_voltage);
+
+	return NULL;
+}
 #endif
 
 #ifdef USE_BITMAIN
@@ -1246,19 +1234,18 @@ static char *set_bitmain_options(const char *arg)
 
 	return NULL;
 }
-static char *set_bitmain_voltage(const char *arg)
-{
-	opt_set_charp(arg, &opt_bitmain_voltage);
-
-	return NULL;
-}
 static char *set_bitmain_freq(const char *arg)
 {
 	opt_set_charp(arg, &opt_bitmain_freq);
 
 	return NULL;
 }
+static char *set_bitmain_voltage(const char *arg)
+{
+	opt_set_charp(arg, &opt_bitmain_voltage);
 
+	return NULL;
+}
 
 #endif
 
@@ -1277,6 +1264,21 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_ARG("--version-file",
 			 set_version_path, NULL, NULL,
 		     "Set miner version file"),
+	OPT_WITH_ARG("--logfile",
+			set_logfile_path, NULL, NULL,
+			"Set log file, default: cgminer.log"),
+	OPT_WITH_ARG("--logfile-openflag",
+			set_logfile_openflag, NULL, NULL,
+			"Set log file open flag, default: a+"),
+	OPT_WITH_ARG("--logwork",
+			set_logwork_path, NULL, NULL,
+			"Set log work file path, following: minertext"),
+	OPT_WITH_ARG("--logwork-asicnum",
+			set_logwork_asicnum, NULL, NULL,
+			"Set log work asic num, following: 1, 32, 64"),
+	OPT_WITHOUT_ARG("--logwork-diff",
+			opt_set_bool, &opt_logwork_diff,
+			"Allow log work diff"),
 	OPT_WITH_ARG("--api-allow",
 		     opt_set_charp, NULL, &opt_api_allow,
 		     "Allow API access only to the given list of [G:]IP[/Prefix] addresses[/subnets]"),
@@ -1392,11 +1394,11 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_ARG("--bmsc-options",
 		     set_bmsc_options, NULL, NULL,
 		     opt_hidden),
-	OPT_WITH_ARG("--bmsc-timing",
-		     set_bmsc_timing, NULL, NULL,
-		     opt_hidden),
 	OPT_WITH_ARG("--bmsc-bandops",
 		     set_bmsc_bandops, NULL, NULL,
+		     opt_hidden),
+	OPT_WITH_ARG("--bmsc-timing",
+		     set_bmsc_timing, NULL, NULL,
 		     opt_hidden),
 	OPT_WITHOUT_ARG("--bmsc-gray",
 		     opt_set_bool, &opt_bmsc_gray,
@@ -1447,7 +1449,7 @@ static struct opt_table opt_config_table[] = {
 		     "Set fanspeed percentage for bitmain, single value or range (default: 20-100)"),
 	OPT_WITH_ARG("--bitmain-freq",
 		     set_bitmain_freq, NULL, NULL,
-		     "Set frequency range for bitmain-auto, single value or range"),
+		     "Set frequency"),
 	OPT_WITH_ARG("--bitmain-voltage",
 		     set_bitmain_voltage, NULL, NULL,
 		     "Set voltage"),
@@ -2710,6 +2712,7 @@ static int total_staged(void)
 WINDOW *mainwin, *statuswin, *logwin;
 #endif
 double total_secs = 1.0;
+double last_total_secs = 1.0;
 static char statusline[256];
 /* logstart is where the log window should start */
 static int devcursor, logstart, logcursor;
@@ -4495,7 +4498,7 @@ void set_work_ntime(struct work *work, int ntime)
  * The macro copy_work() calls this function with an noffset of 0. */
 struct work *copy_work_noffset(struct work *base_work, int noffset)
 {
-	struct work *work = make_work();
+	struct work *work = calloc(1, sizeof(struct work));
 
 	_copy_work(work, base_work, noffset);
 
@@ -5367,6 +5370,7 @@ void zero_stats(void)
 	total_go = 0;
 	total_ro = 0;
 	total_secs = 1.0;
+	last_total_secs = 1.0;
 	total_diff1 = 0;
 	found_blocks = 0;
 	total_diff_accepted = 0;
@@ -9640,8 +9644,6 @@ int main(int argc, char *argv[])
 	g_logfile_enable = false;
 	strcpy(g_logfile_path, "cgminer.log");
 	strcpy(g_logfile_openflag, "a+");
-	strcpy(work_proxy_ip, "127.0.0.1");
-	
 	/* This dangerous functions tramples random dynamically allocated
 	 * variables so do it before anything at all */
 	if (unlikely(curl_global_init(CURL_GLOBAL_ALL)))
@@ -9763,23 +9765,6 @@ int main(int argc, char *argv[])
 		set_target(bench_target, 32);
 	}
 	
-	if(opt_work_proxy) {
-			char *colon = NULL, *colon2 = NULL;
-			colon = opt_work_proxy;
-			colon2 = strchr(colon, ':');
-			if (colon2)
-				*(colon2++) = '\0';
-	
-			strcpy(work_proxy_ip, colon);
-	
-			if (colon2 && *colon2) {
-				work_proxy_port = atoi(colon2);
-			}
-	
-			applog(LOG_ERR, "Work proxy ip: %s port: %d", work_proxy_ip, work_proxy_port);
-		}
-
-	
 	if(opt_version_path) {
 		FILE * fpversion = fopen(opt_version_path, "rb");
 		char tmp[256] = {0};
@@ -9811,6 +9796,7 @@ int main(int argc, char *argv[])
 		}
 		applog(LOG_ERR, "Miner compile time: %s type: %s", g_miner_compiletime, g_miner_type);
 	}
+
 	if(opt_logfile_path) {
 		g_logfile_enable = true;
 		strcpy(g_logfile_path, opt_logfile_path);
@@ -9860,7 +9846,6 @@ int main(int argc, char *argv[])
 		}
 	}
 	
-
 #ifdef HAVE_CURSES
 	if (opt_realquiet || opt_display_devs)
 		use_curses = false;
