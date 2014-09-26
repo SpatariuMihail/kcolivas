@@ -164,7 +164,6 @@ static const char *DEVICECODE = ""
 #ifdef USE_AVALON
 			"AVA "
 #endif
-
 #ifdef USE_BAB
 			"BaB "
 #endif
