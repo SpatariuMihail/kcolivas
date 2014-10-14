@@ -1289,30 +1289,28 @@ static void bitmain_parse_results(struct cgpu_info *bitmain, struct bitmain_info
 							free(ob_hex);
 						}
 
-						if(work->work_block < info->last_work_block) {
-							applog(LOG_ERR, "BitMain: bitmain_parse_rxnonce work(%d) nonce stale", rxnoncedata.nonces[j].work_id);
-						} else {
-							if (bitmain_decode_nonce(thr, bitmain, info, rxnoncedata.nonces[j].nonce, work)) {
-								cg_logwork_uint32(work, rxnoncedata.nonces[j].nonce, true);
-								if(opt_bitmain_hwerror) {
+						if(work->work_block < info->last_work_block)
+							applog(LOG_NOTICE, "BitMain: bitmain_parse_rxnonce work(%d) nonce stale", rxnoncedata.nonces[j].work_id);
+						if (bitmain_decode_nonce(thr, bitmain, info, rxnoncedata.nonces[j].nonce, work)) {
+							cg_logwork_uint32(work, rxnoncedata.nonces[j].nonce, true);
+							if(opt_bitmain_hwerror) {
 #ifndef BITMAIN_CALC_DIFF1
-									mutex_lock(&info->qlock);
-									idiff = (int)work->sdiff;
-									info->nonces+=idiff;
-									info->auto_nonces+=idiff;
-									mutex_unlock(&info->qlock);
-									inc_work_status(thr, pool, idiff);
+								mutex_lock(&info->qlock);
+								idiff = (int)work->sdiff;
+								info->nonces+=idiff;
+								info->auto_nonces+=idiff;
+								mutex_unlock(&info->qlock);
+								inc_work_status(thr, pool, idiff);
 #endif
-								} else {
-									mutex_lock(&info->qlock);
-									info->nonces++;
-									info->auto_nonces++;
-									mutex_unlock(&info->qlock);
-								}
-						 	} else {
-						 		//bitmain_inc_nvw(info, thr);
-						 		applog(LOG_ERR, "BitMain: bitmain_decode_nonce error work(%d)", rxnoncedata.nonces[j].work_id);
-						 	}
+							} else {
+								mutex_lock(&info->qlock);
+								info->nonces++;
+								info->auto_nonces++;
+								mutex_unlock(&info->qlock);
+							}
+						} else {
+							//bitmain_inc_nvw(info, thr);
+							applog(LOG_ERR, "BitMain: bitmain_decode_nonce error work(%d)", rxnoncedata.nonces[j].work_id);
 						}
 					 	free_work(work);
 					} else {
