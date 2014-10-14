@@ -1290,7 +1290,7 @@ static void bitmain_parse_results(struct cgpu_info *bitmain, struct bitmain_info
 						}
 
 						if(work->work_block < info->last_work_block)
-							applog(LOG_NOTICE, "BitMain: bitmain_parse_rxnonce work(%d) nonce stale", rxnoncedata.nonces[j].work_id);
+							applog(LOG_DEBUG, "BitMain: bitmain_parse_rxnonce work(%d) nonce stale", rxnoncedata.nonces[j].work_id);
 						if (bitmain_decode_nonce(thr, bitmain, info, rxnoncedata.nonces[j].nonce, work)) {
 							cg_logwork_uint32(work, rxnoncedata.nonces[j].nonce, true);
 							if(opt_bitmain_hwerror) {
