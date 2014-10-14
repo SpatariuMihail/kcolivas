@@ -6236,7 +6236,7 @@ static void stratum_share_result(json_t *val, json_t *res_val, json_t *err_val,
 static bool parse_stratum_response(struct pool *pool, char *s)
 {
 	json_t *val = NULL, *err_val, *res_val, *id_val;
-	struct stratum_share *sshare;
+	struct stratum_share *sshare = NULL;
 	json_error_t err;
 	bool ret = false;
 	int id;
