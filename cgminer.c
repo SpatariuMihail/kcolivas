@@ -6300,7 +6300,7 @@ static bool parse_stratum_response(struct pool *pool, char *s)
 			pool->diff_accepted += pool_diff;
 			mutex_unlock(&stats_lock);
 		} else {
-			applog(LOG_NOTICE, "Rejected %s stratum share from pool %d",
+			applog(LOG_NOTICE, "Rejected%s stratum share from pool %d",
 			       opt_lowmem ? "" : " untracked", pool->pool_no);
 
 			mutex_lock(&stats_lock);
