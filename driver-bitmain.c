@@ -1095,6 +1095,8 @@ static void bitmain_update_temps(struct cgpu_info *bitmain, struct bitmain_info 
 	}
 }
 
+extern void cg_logwork_uint32(struct work *work, uint32_t nonce, bool ok);
+
 static void bitmain_parse_results(struct cgpu_info *bitmain, struct bitmain_info *info,
 				 struct thr_info *thr, uint8_t *buf, int *offset)
 {
