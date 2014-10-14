@@ -6268,13 +6268,15 @@ static bool parse_stratum_response(struct pool *pool, char *s)
 
 	id = json_integer_value(id_val);
 
-	mutex_lock(&sshare_lock);
-	HASH_FIND_INT(stratum_shares, &id, sshare);
-	if (sshare) {
-		HASH_DEL(stratum_shares, sshare);
-		pool->sshares--;
+	if (!opt_lowmem) {
+		mutex_lock(&sshare_lock);
+		HASH_FIND_INT(stratum_shares, &id, sshare);
+		if (sshare) {
+			HASH_DEL(stratum_shares, sshare);
+			pool->sshares--;
+		}
+		mutex_unlock(&sshare_lock);
 	}
-	mutex_unlock(&sshare_lock);
 
 	if (!sshare) {
 		double pool_diff;
@@ -6286,7 +6288,8 @@ static bool parse_stratum_response(struct pool *pool, char *s)
 		cg_runlock(&pool->data_lock);
 
 		if (json_is_true(res_val)) {
-			applog(LOG_NOTICE, "Accepted untracked stratum share from pool %d", pool->pool_no);
+			applog(LOG_NOTICE, "Accepted%s stratum share from pool %d",
+			       opt_lowmem ? "" : " untracked", pool->pool_no);
 
 			/* We don't know what device this came from so we can't
 			 * attribute the work to the relevant cgpu */
@@ -6297,7 +6300,8 @@ static bool parse_stratum_response(struct pool *pool, char *s)
 			pool->diff_accepted += pool_diff;
 			mutex_unlock(&stats_lock);
 		} else {
-			applog(LOG_NOTICE, "Rejected untracked stratum share from pool %d", pool->pool_no);
+			applog(LOG_NOTICE, "Rejected %s stratum share from pool %d",
+			       opt_lowmem ? "" : " untracked", pool->pool_no);
 
 			mutex_lock(&stats_lock);
 			total_rejected++;
@@ -6626,12 +6630,14 @@ static void *stratum_sthread(void *userdata)
 				if (pool_tclear(pool, &pool->submit_fail))
 						applog(LOG_WARNING, "Pool %d communication resumed, submitting work", pool->pool_no);
 
-				mutex_lock(&sshare_lock);
-				HASH_ADD_INT(stratum_shares, id, sshare);
-				pool->sshares++;
-				mutex_unlock(&sshare_lock);
+				if (!opt_lowmem) {
+					mutex_lock(&sshare_lock);
+					HASH_ADD_INT(stratum_shares, id, sshare);
+					pool->sshares++;
+					mutex_unlock(&sshare_lock);
 
-				applog(LOG_DEBUG, "Successfully submitted, adding to stratum_shares db");
+					applog(LOG_DEBUG, "Successfully submitted, adding to stratum_shares db");
+				}
 				submitted = true;
 				break;
 			}
