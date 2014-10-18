@@ -594,7 +594,7 @@ static int bitmain_set_txtask(uint8_t * sendbuf,
 			memcpy(bm->works[cursendcount].data2, works[index]->data + 64, 12);
 
 			if(cursendcount == 0) {
-				pooldiff = (unsigned int)(works[index]->sdiff);
+				pooldiff = (unsigned int)(works[index]->device_diff);
 				difftmp = pooldiff;
 				while(1) {
 					difftmp = difftmp >> 1;
