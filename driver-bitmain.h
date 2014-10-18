@@ -291,7 +291,7 @@ struct bitmain_info {
 };
 
 #define BITMAIN_READ_SIZE 12
-#define BITMAIN_ARRAY_SIZE 16384
+#define BITMAIN_ARRAY_SIZE 32768
 
 #define BTM_GETS_ERROR -1
 #define BTM_GETS_OK 0
