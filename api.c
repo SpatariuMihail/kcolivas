@@ -334,6 +334,7 @@ static const char *JSON_PARAMETER = "parameter";
 #define MSG_SUMM 11
 #define MSG_INVCMD 14
 #define MSG_MISID 15
+#define MSG_NONCE_NUM 16
 
 #define MSG_VERSION 22
 #define MSG_INVJSON 23
@@ -518,6 +519,7 @@ struct CODES {
 
  { SEVERITY_SUCC,  MSG_SUMM,	PARAM_NONE,	"Summary" },
  { SEVERITY_ERR,   MSG_INVCMD,	PARAM_NONE,	"Invalid command" },
+ { SEVERITY_SUCC,  MSG_NONCE_NUM,PARAM_NONE,    "Nonce num" },
  { SEVERITY_ERR,   MSG_MISID,	PARAM_NONE,	"Missing device id parameter" },
 #ifdef HAVE_AN_FPGA
  { SEVERITY_ERR,   MSG_PGANON,	PARAM_NONE,	"No PGAs" },
