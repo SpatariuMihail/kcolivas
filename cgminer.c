@@ -2571,7 +2571,7 @@ static bool jobj_binary(const json_t *obj, const char *key,
 }
 #endif
 
-static void calc_midstate(struct work *work, struct pool *pool)
+static void calc_midstate(struct pool *pool, struct work *work)
 {
 	unsigned char data[64];
 	uint32_t *data32 = (uint32_t *)data;
