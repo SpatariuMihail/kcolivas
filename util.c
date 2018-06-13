@@ -59,6 +59,42 @@ int no_yield(void)
 
 int (*selective_yield)(void) = &no_yield;
 
+unsigned char bit_swap_table[256] =
+{
+    0x00, 0x80, 0x40, 0xc0, 0x20, 0xa0, 0x60, 0xe0,
+    0x10, 0x90, 0x50, 0xd0, 0x30, 0xb0, 0x70, 0xf0,
+    0x08, 0x88, 0x48, 0xc8, 0x28, 0xa8, 0x68, 0xe8,
+    0x18, 0x98, 0x58, 0xd8, 0x38, 0xb8, 0x78, 0xf8,
+    0x04, 0x84, 0x44, 0xc4, 0x24, 0xa4, 0x64, 0xe4,
+    0x14, 0x94, 0x54, 0xd4, 0x34, 0xb4, 0x74, 0xf4,
+    0x0c, 0x8c, 0x4c, 0xcc, 0x2c, 0xac, 0x6c, 0xec,
+    0x1c, 0x9c, 0x5c, 0xdc, 0x3c, 0xbc, 0x7c, 0xfc,
+    0x02, 0x82, 0x42, 0xc2, 0x22, 0xa2, 0x62, 0xe2,
+    0x12, 0x92, 0x52, 0xd2, 0x32, 0xb2, 0x72, 0xf2,
+    0x0a, 0x8a, 0x4a, 0xca, 0x2a, 0xaa, 0x6a, 0xea,
+    0x1a, 0x9a, 0x5a, 0xda, 0x3a, 0xba, 0x7a, 0xfa,
+    0x06, 0x86, 0x46, 0xc6, 0x26, 0xa6, 0x66, 0xe6,
+    0x16, 0x96, 0x56, 0xd6, 0x36, 0xb6, 0x76, 0xf6,
+    0x0e, 0x8e, 0x4e, 0xce, 0x2e, 0xae, 0x6e, 0xee,
+    0x1e, 0x9e, 0x5e, 0xde, 0x3e, 0xbe, 0x7e, 0xfe,
+    0x01, 0x81, 0x41, 0xc1, 0x21, 0xa1, 0x61, 0xe1,
+    0x11, 0x91, 0x51, 0xd1, 0x31, 0xb1, 0x71, 0xf1,
+    0x09, 0x89, 0x49, 0xc9, 0x29, 0xa9, 0x69, 0xe9,
+    0x19, 0x99, 0x59, 0xd9, 0x39, 0xb9, 0x79, 0xf9,
+    0x05, 0x85, 0x45, 0xc5, 0x25, 0xa5, 0x65, 0xe5,
+    0x15, 0x95, 0x55, 0xd5, 0x35, 0xb5, 0x75, 0xf5,
+    0x0d, 0x8d, 0x4d, 0xcd, 0x2d, 0xad, 0x6d, 0xed,
+    0x1d, 0x9d, 0x5d, 0xdd, 0x3d, 0xbd, 0x7d, 0xfd,
+    0x03, 0x83, 0x43, 0xc3, 0x23, 0xa3, 0x63, 0xe3,
+    0x13, 0x93, 0x53, 0xd3, 0x33, 0xb3, 0x73, 0xf3,
+    0x0b, 0x8b, 0x4b, 0xcb, 0x2b, 0xab, 0x6b, 0xeb,
+    0x1b, 0x9b, 0x5b, 0xdb, 0x3b, 0xbb, 0x7b, 0xfb,
+    0x07, 0x87, 0x47, 0xc7, 0x27, 0xa7, 0x67, 0xe7,
+    0x17, 0x97, 0x57, 0xd7, 0x37, 0xb7, 0x77, 0xf7,
+    0x0f, 0x8f, 0x4f, 0xcf, 0x2f, 0xaf, 0x6f, 0xef,
+    0x1f, 0x9f, 0x5f, 0xdf, 0x3f, 0xbf, 0x7f, 0xff,
+};
+
 static void keep_sockalive(SOCKETTYPE fd)
 {
 	const int tcp_one = 1;
@@ -3666,4 +3702,434 @@ void _cg_memcpy(void *dest, const void *src, unsigned int n, const char *file, c
 		return;
 	}
 	memcpy(dest, src, n);
+}
+int cg_timeval_subtract(struct timeval* result, struct timeval* x, struct timeval* y)
+{
+    int nsec = 0;
+    if(x->tv_sec > y->tv_sec)
+        return -1;
+
+    if((x->tv_sec == y->tv_sec) && (x->tv_usec > y->tv_usec))
+        return -1;
+
+    result->tv_sec = (y->tv_sec - x->tv_sec);
+    result->tv_usec = (y->tv_usec - x->tv_usec);
+
+    if(result->tv_usec < 0)
+    {
+        result->tv_sec--;
+        result->tv_usec += 1000000;
+    }
+    return 0;
+}
+
+void rev(unsigned char *s, size_t l)
+{
+    size_t i, j;
+    unsigned char t;
+
+    for (i = 0, j = l - 1; i < j; i++, j--)
+    {
+        t = s[i];
+        s[i] = s[j];
+        s[j] = t;
+    }
+}
+
+int check_asicnum(int asic_num, unsigned char nonce)
+{
+    switch(asic_num)
+    {
+        case 1:
+            return 1;
+        case 2:
+            switch(nonce & 0x80)
+            {
+                case 0x80:
+                    return 2;
+                default:
+                    return 1;
+            }
+        case 4:
+            switch(nonce & 0xC0)
+            {
+                case 0xC0:
+                    return 4;
+                case 0x80:
+                    return 3;
+                case 0x40:
+                    return 2;
+                default:
+                    return 1;
+            }
+        case 8:
+            switch(nonce & 0xE0)
+            {
+                case 0xE0:
+                    return 8;
+                case 0xC0:
+                    return 7;
+                case 0xA0:
+                    return 6;
+                case 0x80:
+                    return 5;
+                case 0x60:
+                    return 4;
+                case 0x40:
+                    return 3;
+                case 0x20:
+                    return 2;
+                default :
+                    return 1;
+            }
+        case 16:
+            switch(nonce & 0xF0)
+            {
+                case 0xF0:
+                    return 16;
+                case 0xE0:
+                    return 15;
+                case 0xD0:
+                    return 14;
+                case 0xC0:
+                    return 13;
+                case 0xB0:
+                    return 12;
+                case 0xA0:
+                    return 11;
+                case 0x90:
+                    return 10;
+                case 0x80:
+                    return 9;
+                case 0x70:
+                    return 8;
+                case 0x60:
+                    return 7;
+                case 0x50:
+                    return 6;
+                case 0x40:
+                    return 5;
+                case 0x30:
+                    return 4;
+                case 0x20:
+                    return 3;
+                case 0x10:
+                    return 2;
+                default :
+                    return 1;
+            }
+        case 32:
+            switch(nonce & 0xF8)
+            {
+                case 0xF8:
+                    return 32;
+                case 0xF0:
+                    return 31;
+                case 0xE8:
+                    return 30;
+                case 0xE0:
+                    return 29;
+                case 0xD8:
+                    return 28;
+                case 0xD0:
+                    return 27;
+                case 0xC8:
+                    return 26;
+                case 0xC0:
+                    return 25;
+                case 0xB8:
+                    return 24;
+                case 0xB0:
+                    return 23;
+                case 0xA8:
+                    return 22;
+                case 0xA0:
+                    return 21;
+                case 0x98:
+                    return 20;
+                case 0x90:
+                    return 19;
+                case 0x88:
+                    return 18;
+                case 0x80:
+                    return 17;
+                case 0x78:
+                    return 16;
+                case 0x70:
+                    return 15;
+                case 0x68:
+                    return 14;
+                case 0x60:
+                    return 13;
+                case 0x58:
+                    return 12;
+                case 0x50:
+                    return 11;
+                case 0x48:
+                    return 10;
+                case 0x40:
+                    return 9;
+                case 0x38:
+                    return 8;
+                case 0x30:
+                    return 7;
+                case 0x28:
+                    return 6;
+                case 0x20:
+                    return 5;
+                case 0x18:
+                    return 4;
+                case 0x10:
+                    return 3;
+                case 0x08:
+                    return 2;
+                default :
+                    return 1;
+            }
+        case 64:
+            switch(nonce & 0xFC)
+            {
+                case 0xFC:
+                    return 64;
+                case 0xF8:
+                    return 63;
+                case 0xF4:
+                    return 62;
+                case 0xF0:
+                    return 61;
+                case 0xEC:
+                    return 60;
+                case 0xE8:
+                    return 59;
+                case 0xE4:
+                    return 58;
+                case 0xE0:
+                    return 57;
+                case 0xDC:
+                    return 56;
+                case 0xD8:
+                    return 55;
+                case 0xD4:
+                    return 54;
+                case 0xD0:
+                    return 53;
+                case 0xCC:
+                    return 52;
+                case 0xC8:
+                    return 51;
+                case 0xC4:
+                    return 50;
+                case 0xC0:
+                    return 49;
+                case 0xBC:
+                    return 48;
+                case 0xB8:
+                    return 47;
+                case 0xB4:
+                    return 46;
+                case 0xB0:
+                    return 45;
+                case 0xAC:
+                    return 44;
+                case 0xA8:
+                    return 43;
+                case 0xA4:
+                    return 42;
+                case 0xA0:
+                    return 41;
+                case 0x9C:
+                    return 40;
+                case 0x98:
+                    return 39;
+                case 0x94:
+                    return 38;
+                case 0x90:
+                    return 37;
+                case 0x8C:
+                    return 36;
+                case 0x88:
+                    return 35;
+                case 0x84:
+                    return 34;
+                case 0x80:
+                    return 33;
+                case 0x7C:
+                    return 32;
+                case 0x78:
+                    return 31;
+                case 0x74:
+                    return 30;
+                case 0x70:
+                    return 29;
+                case 0x6C:
+                    return 28;
+                case 0x68:
+                    return 27;
+                case 0x64:
+                    return 26;
+                case 0x60:
+                    return 25;
+                case 0x5C:
+                    return 24;
+                case 0x58:
+                    return 23;
+                case 0x54:
+                    return 22;
+                case 0x50:
+                    return 21;
+                case 0x4C:
+                    return 20;
+                case 0x48:
+                    return 19;
+                case 0x44:
+                    return 18;
+                case 0x40:
+                    return 17;
+                case 0x3C:
+                    return 16;
+                case 0x38:
+                    return 15;
+                case 0x34:
+                    return 14;
+                case 0x30:
+                    return 13;
+                case 0x2C:
+                    return 12;
+                case 0x28:
+                    return 11;
+                case 0x24:
+                    return 10;
+                case 0x20:
+                    return 9;
+                case 0x1C:
+                    return 8;
+                case 0x18:
+                    return 7;
+                case 0x14:
+                    return 6;
+                case 0x10:
+                    return 5;
+                case 0x0C:
+                    return 4;
+                case 0x08:
+                    return 3;
+                case 0x04:
+                    return 2;
+                default :
+                    return 1;
+            }
+        default:
+            return 0;
+    }
+}
+
+void cg_logwork(struct work *work, unsigned char *nonce_bin, bool ok)
+{
+    if(opt_logwork_path)
+    {
+        char szmsg[1024] = {0};
+        unsigned char midstate_tmp[32] = {0};
+        unsigned char data_tmp[32] = {0};
+        unsigned char hash_tmp[32] = {0};
+        char * szworkdata = NULL;
+        char * szmidstate = NULL;
+        char * szdata = NULL;
+        char * sznonce4 = NULL;
+        char * sznonce5 = NULL;
+        char * szhash = NULL;
+        int asicnum = 0;
+        uint64_t worksharediff = 0;
+        memcpy(midstate_tmp, work->midstate, 32);
+        memcpy(data_tmp, work->data+64, 12);
+        memcpy(hash_tmp, work->hash, 32);
+        rev((void *)midstate_tmp, 32);
+        rev((void *)data_tmp, 12);
+        rev((void *)hash_tmp, 32);
+        szworkdata = bin2hex((void *)work->data, 128);
+        szmidstate = bin2hex((void *)midstate_tmp, 32);
+        szdata = bin2hex((void *)data_tmp, 12);
+        sznonce4 = bin2hex((void *)nonce_bin, 4);
+        sznonce5 = bin2hex((void *)nonce_bin, 5);
+        szhash = bin2hex((void *)hash_tmp, 32);
+        worksharediff = share_ndiff(work);
+        sprintf(szmsg, "%s %08x midstate %s data %s nonce %s hash %s diff %I64d", ok?"o":"x", work->id, szmidstate, szdata, sznonce5, szhash, worksharediff);
+        if(strcmp(opt_logwork_path, "screen") == 0)
+        {
+            applog(LOG_ERR, szmsg);
+        }
+        else
+        {
+            applog(LOG_ERR, szmsg);
+            if(g_logwork_file)
+            {
+                sprintf(szmsg, "%s %08x work %s midstate %s data %s nonce %s hash %s diff %I64d", ok?"o":"x", work->id, szworkdata, szmidstate, szdata, sznonce5, szhash, worksharediff);
+
+                fwrite(szmsg, strlen(szmsg), 1, g_logwork_file);
+                fwrite("\n", 1, 1, g_logwork_file);
+                fflush(g_logwork_file);
+
+                if(ok)
+                {
+                    if(g_logwork_asicnum == 1)
+                    {
+                        sprintf(szmsg, "midstate %s data %s nonce %s hash %s", szmidstate, szdata, sznonce4, szhash);
+                        fwrite(szmsg, strlen(szmsg), 1, g_logwork_files[0]);
+                        fwrite("\n", 1, 1, g_logwork_files[0]);
+                        fflush(g_logwork_files[0]);
+                    }
+                    else if(g_logwork_asicnum == 32 || g_logwork_asicnum == 64)
+                    {
+                        sprintf(szmsg, "midstate %s data %s nonce %s hash %s", szmidstate, szdata, sznonce4, szhash);
+                        asicnum = check_asicnum(g_logwork_asicnum, nonce_bin[0]);
+                        fwrite(szmsg, strlen(szmsg), 1, g_logwork_files[asicnum]);
+                        fwrite("\n", 1, 1, g_logwork_files[asicnum]);
+                        fflush(g_logwork_files[asicnum]);
+                    }
+
+                    if(opt_logwork_diff)
+                    {
+                        int diffnum = 0;
+                        uint64_t difftmp = worksharediff;
+                        while(1)
+                        {
+                            difftmp = difftmp >> 1;
+                            if(difftmp > 0)
+                            {
+                                diffnum++;
+                                if(diffnum >= 64)
+                                {
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                break;
+                            }
+                        }
+                        applog(LOG_DEBUG, "work diff %I64d diffnum %d", worksharediff, diffnum);
+                        sprintf(szmsg, "midstate %s data %s nonce %s hash %s", szmidstate, szdata, sznonce4, szhash);
+                        fwrite(szmsg, strlen(szmsg), 1, g_logwork_diffs[diffnum]);
+                        fwrite("\n", 1, 1, g_logwork_diffs[diffnum]);
+                        fflush(g_logwork_diffs[diffnum]);
+                    }
+                }
+            }
+        }
+        if(szworkdata) free(szworkdata);
+        if(szmidstate) free(szmidstate);
+        if(szdata) free(szdata);
+        if(sznonce4) free(sznonce4);
+        if(sznonce5) free(sznonce5);
+        if(szhash) free(szhash);
+    }
+}
+
+void cg_logwork_uint32(struct work *work, uint32_t nonce, bool ok)
+{
+    if(opt_logwork_path)
+    {
+        unsigned char nonce_bin[5] = {0};
+        memcpy(nonce_bin, &nonce, 4);
+        cg_logwork(work, nonce_bin, ok);
+    }
 }
