@@ -2571,7 +2571,7 @@ static bool jobj_binary(const json_t *obj, const char *key,
 }
 #endif
 
-static void calc_midstate(struct work *work)
+static void calc_midstate(struct work *work, struct pool *pool)
 {
 	unsigned char data[64];
 	uint32_t *data32 = (uint32_t *)data;
@@ -3312,6 +3312,7 @@ out:
 	return ret;
 }
 #else /* HAVE_LIBCURL */
+#define pool_localgen(pool) (true)
 #define json_rpc_call(curl, url, userpass, rpc_req, probe, longpoll, rolltime, pool, share) (NULL)
 #define work_decode(pool, work, val) (false)
 #define gen_gbt_work(pool, work) {}
