@@ -1978,6 +1978,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITH_ARG("--expiry|-E",
 		     set_null, NULL, &opt_set_null,
 		     opt_hidden),
+	OPT_WITHOUT_ARG("--extranonce-subscribe",
+                    set_extranonce_subscribe, NULL,
+                    "Enable 'extranonce' stratum subscribe for MinToRRo by Zwilla"),
 	OPT_WITHOUT_ARG("--failover-only",
 			set_null, &opt_set_null,
 			opt_hidden),
@@ -5887,6 +5890,10 @@ void write_config(FILE *fcfg)
 				pool->rpc_proxy ? "|" : "",
 				json_escape(pool->rpc_url));
 		}
+		if (pool->extranonce_subscribe)
+    		{
+    		    fputs("\n\t\t\"extranonce-subscribe\" : true,", fcfg);
+     		}
 		fprintf(fcfg, "\n\t\t\"user\" : \"%s\",", json_escape(pool->rpc_user));
 		fprintf(fcfg, "\n\t\t\"pass\" : \"%s\"\n\t}", json_escape(pool->rpc_pass));
 		}
@@ -7442,7 +7449,7 @@ retry_stratum:
 		bool init = pool_tset(pool, &pool->stratum_init);
 
 		if (!init) {
-			bool ret = initiate_stratum(pool) && auth_stratum(pool);
+			bool ret = initiate_stratum(pool) && (!pool->extranonce_subscribe || subscribe_extranonce(pool)) && auth_stratum(pool);
 
 			if (ret)
 				init_stratum_threads(pool);
