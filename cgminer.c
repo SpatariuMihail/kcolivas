@@ -1087,6 +1087,11 @@ static char *set_url(char *arg)
 	struct pool *pool = add_url();
 
 	setup_url(pool, arg);
+	if (strstr(pool->rpc_url, ".nicehash.com") || strstr(pool->rpc_url, "#xnsub"))
+    {
+        pool->extranonce_subscribe = true;
+        applog(LOG_DEBUG, "Pool %d extranonce subscribing enabled.", pool->pool_no);
+    }
 	return NULL;
 }
 
@@ -2617,7 +2622,10 @@ static int total_work_inc(void)
 static struct work *make_work(void)
 {
 	struct work *work = cgcalloc(1, sizeof(struct work));
-
+	if (unlikely(!work))
+	{
+        quit(1, "Failed to calloc work in make_work");
+	}
 	work->id = total_work_inc();
 	return work;
 }
