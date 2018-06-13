@@ -2640,11 +2640,18 @@ static void summary(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __mayb
 	total_diff1 = total_diff_accepted + total_diff_rejected + total_diff_stale;
 #endif
 	utility = total_accepted / ( total_secs ? total_secs : 1 ) * 60;
+	ghs = getAVGhashrate();
 	mhs = total_mhashes_done / total_secs;
 	work_utility = total_diff1 / ( total_secs ? total_secs : 1 ) * 60;
 
 	root = api_add_elapsed(root, "Elapsed", &(total_secs), true);
+#ifndef USE_BITMAIN_C5
+    root = api_add_mhs(root, "GHS 5s", &(g_displayed_rolling), false);
+#else
+    root = api_add_string(root, "GHS 5s", displayed_hash_rate, false);
+#endif
 	root = api_add_mhs(root, "MHS av", &(mhs), false);
+	root = api_add_mhs(root, "GHS av", &(ghs), false);
 	char mhsname[27];
 	sprintf(mhsname, "MHS %ds", opt_log_interval);
 	root = api_add_mhs(root, mhsname, &(total_rolling), false);
