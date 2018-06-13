@@ -3529,28 +3529,7 @@ static void minecoin(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __may
 	if (isjson && io_open)
 		io_close(io_data);
 }
-static void minecoin(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __maybe_unused char *param, bool isjson, __maybe_unused char group)
-{
-	struct api_data *root = NULL;
-	bool io_open;
 
-	message(io_data, MSG_MINECOIN, 0, NULL, isjson);
-	io_open = io_add(io_data, isjson ? COMSTR JSON_MINECOIN : _MINECOIN COMSTR);
-
-	root = api_add_const(root, "Hash Method", SHA256STR, false);
-
-	cg_rlock(&ch_lock);
-	root = api_add_timeval(root, "Current Block Time", &block_timeval, true);
-	root = api_add_string(root, "Current Block Hash", current_hash, true);
-	cg_runlock(&ch_lock);
-
-	root = api_add_bool(root, "LP", &have_longpoll, false);
-	root = api_add_diff(root, "Network Difficulty", &current_diff, true);
-
-	root = print_data(io_data, root, isjson, false);
-	if (isjson && io_open)
-		io_close(io_data);
-}
 static void debugstate(struct io_data *io_data, __maybe_unused SOCKETTYPE c, char *param, bool isjson, __maybe_unused char group)
 {
 	struct api_data *root = NULL;
