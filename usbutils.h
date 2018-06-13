@@ -50,6 +50,12 @@
 
 #define FTDI_VALUE_DATA_AVA 8
 
+// Bitmain
+#define FTDI_VALUE_BAUD_BTM 0x001A
+#define FTDI_INDEX_BAUD_BTM 0x0000
+
+#define FTDI_VALUE_DATA_BTM 8
+
 // BitBurner
 #define BITBURNER_REQUEST ((uint8_t)0x42)
 #define BITBURNER_VALUE 0x4242
@@ -143,6 +149,8 @@ enum sub_ident {
 	IDENT_AMU,
 	IDENT_ANT,
 	IDENT_ANU,
+	IDENT_BMM,
+	IDENT_BMS,
 	IDENT_AS3,
 	IDENT_AU3,
 	IDENT_AVA,
@@ -483,6 +491,17 @@ enum usb_cmds {
 
 struct device_drv;
 struct cgpu_info;
+
+#ifdef USE_BITMAIN
+struct cgpu_info *btm_alloc_cgpu(struct device_drv *drv, int threads);
+struct cgpu_info *btm_free_cgpu(struct cgpu_info *cgpu);
+void btm_uninit(struct cgpu_info *cgpu);
+bool btm_init(struct cgpu_info *cgpu, const char * devpath);
+void btm_detect(struct device_drv *drv, bool (*device_detect)(const char*));
+int btm_read(struct cgpu_info *cgpu, char *buf, size_t bufsize);
+int btm_write(struct cgpu_info *cgpu, char *buf, size_t bufsize);
+#endif
+
 
 bool async_usb_transfers(void);
 void cancel_usb_transfers(void);
