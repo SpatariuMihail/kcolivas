@@ -2896,11 +2896,6 @@ static bool getwork_decode(json_t *res_val, struct work *work)
     }
 
     if (!jobj_binary(res_val, "midstate", work->midstate, sizeof(work->midstate), false))
-    {
-        // Calculate it ourselves
-        applog(LOG_DEBUG, "Calculating midstate locally");
-        calc_midstate(work);
-    }
 
     if (unlikely(!jobj_binary(res_val, "target", work->target, sizeof(work->target), true)))
     {
