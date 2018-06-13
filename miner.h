@@ -1027,11 +1027,16 @@ extern bool have_longpoll;
 extern char *opt_kernel_path;
 extern char *opt_socks_proxy;
 extern int opt_suggest_diff;
+extern int opt_multi_version;
 extern char *cgminer_path;
+extern bool opt_fail_only;
 extern bool opt_lowmem;
 extern bool opt_autofan;
 extern bool opt_autoengine;
 extern bool use_curses;
+extern char *opt_logwork_path;
+extern char *opt_logwork_asicnum;
+extern bool opt_logwork_diff;
 extern char *opt_api_allow;
 extern bool opt_api_mcast;
 extern char *opt_api_mcast_addr;
@@ -1047,6 +1052,7 @@ extern bool opt_api_network;
 extern bool opt_delaynet;
 extern time_t last_getwork;
 extern bool opt_restart;
+
 #ifdef USE_ICARUS
 extern char *opt_icarus_options;
 extern char *opt_icarus_timing;
@@ -1089,7 +1095,7 @@ extern char *opt_bitmain_options;
 extern char *opt_bitmain_freq;
 extern bool opt_bitmain_hwerror;
 #endif
-#if (defined(USE_ANT_S2) || defined(USE_ANT_S3))
+#if (defined(USE_ANT_S2) || defined(USE_ANT_S3)) || defined(USE_BITMAIN_C5))
 #ifndef USE_ANT_S3
 extern char *opt_bitmain_dev;
 #endif
