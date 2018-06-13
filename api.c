@@ -2511,6 +2511,8 @@ static void poolstatus(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __m
 	int second = 0;
 	double sdiff0 = 0.0;
 
+	char lasttime[256] = {0};
+  	long timediff = 0;
 	if (total_pools == 0) {
 		message(io_data, MSG_NOPOOL, 0, NULL, isjson);
 		return;
