@@ -1941,6 +1941,9 @@ static void apiversion(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __m
 
 	root = api_add_string(root, "CGMiner", VERSION, false);
 	root = api_add_const(root, "API", APIVERSION, false);
+	root = api_add_string(root, "Miner", g_miner_version, false);
+	root = api_add_string(root, "CompileTime", g_miner_compiletime, false);
+	root = api_add_string(root, "Type", g_miner_type, false);
 
 	root = print_data(io_data, root, isjson, false);
 	if (isjson && io_open)
@@ -1972,6 +1975,10 @@ static void minerconfig(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __
 	root = api_add_int(root, "Log Interval", &opt_log_interval, false);
 	root = api_add_const(root, "Device Code", DEVICECODE, false);
 	root = api_add_const(root, "OS", OSINFO, false);
+	root = api_add_bool(root, "Failover-Only", &opt_fail_only, false);
+	root = api_add_int(root, "ScanTime", &opt_scantime, false);
+	root = api_add_int(root, "Queue", &opt_queue, false);
+	root = api_add_int(root, "Expiry", &opt_expiry, false);
 #ifdef USE_USBUTILS
 	if (hotplug_time == 0)
 		root = api_add_const(root, "Hotplug", DISABLED, false);
@@ -2499,6 +2506,9 @@ static void poolstatus(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __m
 	bool io_open = false;
 	char *status, *lp;
 	int i;
+	int hour = 0;
+	int minute = 0;
+	int second = 0;
 	double sdiff0 = 0.0;
 
 	if (total_pools == 0) {
@@ -2539,6 +2549,18 @@ static void poolstatus(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __m
 			lp = (char *)YES;
 		else
 			lp = (char *)NO;
+		if(pool->last_share_time <= 0) {
+			strcpy(lasttime, "0");
+		} else {
+			timediff = time(NULL) - pool->last_share_time;
+			if(timediff < 0)
+				timediff = 0;
+
+			hour = timediff / 3600;
+			minute = (timediff % 3600) / 60;
+			second = (timediff % 3600) % 60;
+			sprintf(lasttime, "%d:%02d:%02d", hour, minute, second);
+		}
 
 		root = api_add_int(root, "POOL", &i, false);
 		root = api_add_escape(root, "URL", pool->rpc_url, false);
@@ -2610,7 +2632,9 @@ static void summary(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __mayb
 
 	// stop hashmeter() changing some while copying
 	mutex_lock(&hash_lock);
-
+#ifdef USE_BITMAIN_C5
+	total_diff1 = total_diff_accepted + total_diff_rejected + total_diff_stale;
+#endif
 	utility = total_accepted / ( total_secs ? total_secs : 1 ) * 60;
 	mhs = total_mhashes_done / total_secs;
 	work_utility = total_diff1 / ( total_secs ? total_secs : 1 ) * 60;
@@ -2656,6 +2680,22 @@ static void summary(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __mayb
 	root = api_add_time(root, "Last getwork", &last_getwork, false);
 
 	mutex_unlock(&hash_lock);
+
+	root = print_data(io_data, root, isjson, false);
+	if (isjson && io_open)
+		io_close(io_data);
+}
+static void noncenum(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __maybe_unused char *param, bool isjson, __maybe_unused char group)
+{
+	struct api_data *root = NULL;
+	bool io_open;
+
+	message(io_data, MSG_NONCE_NUM, 0, NULL, isjson);
+	io_open = io_add(io_data, isjson ? COMSTR JSON_NONCENUM : _NONCENUM COMSTR);
+
+	root = api_add_string(root, "10min nonce",nonce_num10_string, false);
+	root = api_add_string(root, "30min nonce",nonce_num30_string , false);
+	root = api_add_string(root, "60min nonce",nonce_num60_string , false);
 
 	root = print_data(io_data, root, isjson, false);
 	if (isjson && io_open)
@@ -3221,6 +3261,13 @@ static int itemstats(struct io_data *io_data, int i, char *id, struct cgminer_st
 	root = api_add_timeval(root, "Wait", &(stats->getwork_wait), false);
 	root = api_add_timeval(root, "Max", &(stats->getwork_wait_max), false);
 	root = api_add_timeval(root, "Min", &(stats->getwork_wait_min), false);
+#ifndef USE_BITMAIN_C5
+	root = api_add_mhs(root, "GHS 5s", &(g_displayed_rolling), false);
+#else
+	root = api_add_string(root, "GHS 5s", displayed_hash_rate, false);
+#endif
+
+	root = api_add_mhs(root, "GHS av", &(ghs), false);
 
 	if (pool_stats) {
 		root = api_add_uint32(root, "Pool Calls", &(pool_stats->getwork_calls), false);
@@ -3324,6 +3371,11 @@ static void minerstats(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __m
 
 	if (isjson)
 		io_open = io_add(io_data, COMSTR JSON_MINESTATS);
+	root = api_add_string(root, "CGMiner", VERSION, false);
+	root = api_add_string(root, "Miner", g_miner_version, false);
+	root = api_add_string(root, "CompileTime", g_miner_compiletime, false);
+	root = api_add_string(root, "Type", g_miner_type, false);
+	root = print_data(io_data, root, isjson, false);
 
 	i = 0;
 	for (j = 0; j < total_devices; j++) {
@@ -3465,7 +3517,28 @@ static void minecoin(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __may
 	if (isjson && io_open)
 		io_close(io_data);
 }
+static void minecoin(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __maybe_unused char *param, bool isjson, __maybe_unused char group)
+{
+	struct api_data *root = NULL;
+	bool io_open;
 
+	message(io_data, MSG_MINECOIN, 0, NULL, isjson);
+	io_open = io_add(io_data, isjson ? COMSTR JSON_MINECOIN : _MINECOIN COMSTR);
+
+	root = api_add_const(root, "Hash Method", SHA256STR, false);
+
+	cg_rlock(&ch_lock);
+	root = api_add_timeval(root, "Current Block Time", &block_timeval, true);
+	root = api_add_string(root, "Current Block Hash", current_hash, true);
+	cg_runlock(&ch_lock);
+
+	root = api_add_bool(root, "LP", &have_longpoll, false);
+	root = api_add_diff(root, "Network Difficulty", &current_diff, true);
+
+	root = print_data(io_data, root, isjson, false);
+	if (isjson && io_open)
+		io_close(io_data);
+}
 static void debugstate(struct io_data *io_data, __maybe_unused SOCKETTYPE c, char *param, bool isjson, __maybe_unused char group)
 {
 	struct api_data *root = NULL;
@@ -4077,6 +4150,7 @@ struct CMDS {
 	{ "edevs",		edevstatus,	false,	true },
 	{ "pools",		poolstatus,	false,	true },
 	{ "summary",		summary,	false,	true },
+	{ "noncenum",		noncenum,	false,	true },
 #ifdef HAVE_AN_FPGA
 	{ "pga",		pgadev,		false,	false },
 	{ "pgaenable",		pgaenable,	true,	false },
