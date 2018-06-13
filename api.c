@@ -3372,6 +3372,7 @@ static int itemstats(struct io_data *io_data, int i, char *id, struct cgminer_st
 
 static void minerstats(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __maybe_unused char *param, bool isjson, __maybe_unused char group)
 {
+	struct api_data *root = NULL;
 	struct cgpu_info *cgpu;
 	bool io_open = false;
 	struct api_data *extra;
