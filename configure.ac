@@ -171,6 +171,20 @@ if test "x$ants3" = xyes; then
 fi
 AM_CONDITIONAL([HAS_ANT_S3], [test x$ants3 = xyes])
 
+bitmain_c5="no"
+
+AC_ARG_ENABLE([bitmain_c5],
+	[AC_HELP_STRING([--enable-bitmain-c5],[Compile support for Bitmain C5(default disabled)])],
+	[bitmain_c5=$enableval]
+	)
+if test "x$bitmain_c5" = xyes; then
+	AC_DEFINE([USE_BITMAIN_C5], [1], [Defined to 1 if Bitmain C5 support is wanted])
+	drivercount=x$drivercount
+	standalone="yes"
+fi
+AM_CONDITIONAL([HAS_BITMAIN_C5], [test x$bitmain_c5 = xyes])
+
+
 avalon="no"
 
 AC_ARG_ENABLE([avalon],
@@ -535,7 +549,7 @@ else
 	want_libbitfury=false
 fi
 
-if test x$avalon2$avalon4$avalon7$avalon_miner$hashratio != xnonononono; then
+if test x$avalon2$avalon4$avalon7$avalon_miner$hashratio$bitmain_c5 != xnononononono; then
 	want_crc16=true
 else
 	want_crc16=false
@@ -759,6 +773,12 @@ else
 	echo "  Antminer.S3.Bitmain..: Disabled"
 fi
 
+if test "x$bitmain_c5" = xyes; then
+	echo "  Bitmain.C5...: Enabled"
+else
+	echo "  Bitmain.C5...: Disabled"
+fi
+
 if test "x$avalon" = xyes; then
 	echo "  Avalon.ASICs.........: Enabled"
 else
@@ -905,7 +925,7 @@ else
 fi
 
 #Add any new device to this, along with a no on the end of the test
-if test "x$avalon$avalon2$avalon4$avalon7$avalon_miner$bab$bflsc$bitforce$bitfury$bitfury16$blockerupter$hashfast$hashratio$icarus$klondike$knc$modminer$drillbit$minion$cointerra$bitmine_A1$ants1$ants2$ants3$sp10$sp30$dragonmint_t1" = xnonononononononononononononononononononononononononono; then
+if test "x$avalon$avalon2$avalon4$avalon7$avalon_miner$bab$bflsc$bitforce$bitfury$bitfury16$blockerupter$hashfast$hashratio$icarus$klondike$knc$modminer$drillbit$minion$cointerra$bitmine_A1$ants1$ants2$ants3$sp10$sp30$dragonmint_t1$bitmain_c5" = xnononononononononononononononononononononononononononono; then
 	echo
 	AC_MSG_ERROR([No mining devices configured in])
 	echo
