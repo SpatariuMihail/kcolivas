@@ -198,6 +198,10 @@ if HAS_ANT_S3
 cgminer_SOURCES += driver-bitmain.c driver-bitmain.h
 endif
 
+if HAS_BITMAIN_C5
+cgminer_SOURCES += driver-btm-c5.c driver-btm-c5.h sha2_c5.c sha2_c5.h
+endif
+
 if HAS_MODMINER
 cgminer_SOURCES += driver-modminer.c
 bitstreamsdir = $(bindir)/bitstreams
