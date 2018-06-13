@@ -3354,6 +3354,9 @@ static int total_staged(void)
 WINDOW *mainwin, *statuswin, *logwin;
 #endif
 double total_secs = 1.0;
+double new_total_secs  = 1.0;
+double last_total_secs = 1.0;
+
 static char statusline[256];
 /* logstart is where the log window should start */
 static int devcursor, logstart, logcursor;
