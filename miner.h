@@ -165,10 +165,16 @@ static inline int fsync (int fd)
 #endif
 #endif /* !defined(__GLXBYTEORDER_H__) */
 
+#ifndef bswap_8
+extern unsigned char bit_swap_table[256];
+#define bswap_8(x) (bit_swap_table[x])
+#endif
+
 /* This assumes htobe32 is a macro in endian.h, and if it doesn't exist, then
  * htobe64 also won't exist */
 #ifndef htobe32
 # if __BYTE_ORDER == __LITTLE_ENDIAN
+#  define htole8(x) (x)
 #  define htole16(x) (x)
 #  define le16toh(x) (x)
 #  define htole32(x) (x)
@@ -181,6 +187,7 @@ static inline int fsync (int fd)
 #  define htobe32(x) bswap_32(x)
 #  define htobe64(x) bswap_64(x)
 # elif __BYTE_ORDER == __BIG_ENDIAN
+#  define htole8(x) bswap_8(x)
 #  define htole16(x) bswap_16(x)
 #  define le16toh(x) bswap_16(x)
 #  define htole32(x) bswap_32(x)
@@ -192,6 +199,15 @@ static inline int fsync (int fd)
 #  define htobe16(x) (x)
 #  define htobe32(x) (x)
 #  define htobe64(x) (x)
+#else
+#error UNKNOWN BYTE ORDER
+#endif
+#else
+
+# if __BYTE_ORDER == __LITTLE_ENDIAN
+#  define htole8(x) (x)
+# elif __BYTE_ORDER == __BIG_ENDIAN
+#  define htole8(x) bswap_8(x)
 #else
 #error UNKNOWN BYTE ORDER
 #endif
@@ -245,6 +261,7 @@ static inline int fsync (int fd)
 	DRIVER_ADD_COMMAND(ants1) \
 	DRIVER_ADD_COMMAND(ants2) \
 	DRIVER_ADD_COMMAND(ants3) \
+	DRIVER_ADD_COMMAND(bitmain_c5) \
 	DRIVER_ADD_COMMAND(avalon) \
 	DRIVER_ADD_COMMAND(avalon2) \
 	DRIVER_ADD_COMMAND(avalon4) \
@@ -996,6 +1013,14 @@ struct pool;
 #define API_MCAST_CODE "FTW"
 #define API_MCAST_ADDR "224.0.0.75"
 
+extern bool g_logfile_enable;
+extern char g_logfile_path[256];
+extern char g_logfile_openflag[32];
+extern FILE * g_logwork_file;
+extern FILE * g_logwork_files[65];
+extern FILE * g_logwork_diffs[65];
+extern int g_logwork_asicnum;
+
 extern bool opt_work_update;
 extern bool opt_protocol;
 extern bool have_longpoll;
@@ -1076,6 +1101,9 @@ extern bool opt_bitmain_checkn2diff;
 extern bool opt_bitmain_beeper;
 extern bool opt_bitmain_tempoverctrl;
 extern char *opt_bitmain_voltage;
+extern bool opt_bitmain_new_cmd_type_vil;
+extern bool opt_bitmain_fan_ctrl;
+extern int opt_bitmain_fan_pwm;
 #endif
 #ifdef USE_MINION
 extern int opt_minion_chipreport;
@@ -1137,6 +1165,9 @@ typedef bool (*sha256_func)(struct thr_info*, const unsigned char *pmidstate,
 
 extern bool fulltest(const unsigned char *hash, const unsigned char *target);
 
+extern int opt_queue;
+extern int opt_scantime;
+extern int opt_expiry;
 extern const int max_scantime;
 
 extern cglock_t control_lock;
@@ -1175,6 +1206,9 @@ extern bool add_pool_details(struct pool *pool, bool live, char *url, char *user
 
 #define MAX_DEVICES 4096
 
+extern char g_miner_version[256];
+extern char g_miner_compiletime[256];
+extern char g_miner_type[256];
 extern bool hotplug_mode;
 extern int hotplug_time;
 extern struct list_head scan_devices;
@@ -1198,8 +1232,11 @@ extern int opt_rotate_period;
 extern double rolling1, rolling5, rolling15;
 extern double total_rolling;
 extern double total_mhashes_done;
+extern double g_displayed_rolling;
+extern char displayed_hash_rate[16];
 extern unsigned int new_blocks;
 extern unsigned int found_blocks;
+extern int g_max_fan, g_max_temp;
 extern int64_t total_accepted, total_rejected, total_diff1;
 extern int64_t total_getworks, total_stale, total_discarded;
 extern double total_diff_accepted, total_diff_rejected, total_diff_stale;
@@ -1213,6 +1250,21 @@ extern double current_diff;
 extern uint64_t best_diff;
 extern struct timeval block_timeval;
 extern char *workpadding;
+extern char *set_bitmain_dev(char *arg);
+extern bool opt_bitmain_auto;
+extern int opt_bitmain_overheat;
+extern char *set_bitmain_fan(char *arg);
+extern int opt_bitmain_temp;
+
+#define NONCE_BUFF 4096
+extern char nonce_num10_string[NONCE_BUFF];
+extern char nonce_num30_string[NONCE_BUFF];
+extern char nonce_num60_string[NONCE_BUFF];
+
+extern double new_total_mhashes_done;
+extern double new_total_secs;
+extern bool re_calc_ghs;
+
 
 struct curl_ent {
 	CURL *curl;
@@ -1336,6 +1388,11 @@ struct pool {
 	bool stratum_active;
 	bool stratum_init;
 	bool stratum_notify;
+#ifdef USE_BITMAIN_C5
+	bool support_vil;
+	int version_num;
+	int version[4];
+#endif
 	struct stratum_work swork;
 	pthread_t stratum_sthread;
 	pthread_t stratum_rthread;
@@ -1463,6 +1520,10 @@ struct work {
 	struct timeval	tv_work_start;
 	struct timeval	tv_work_found;
 	char		getwork_mode;
+#ifdef USE_BITMAIN_C5
+	int version;
+#endif
+
 };
 
 #ifdef USE_MODMINER
@@ -1505,8 +1566,11 @@ struct modminer_fpga_state {
 	strcat(buf, tmp13); \
 } while (0)
 
+extern uint64_t share_ndiff(const struct work *work);
 extern void get_datestamp(char *, size_t, struct timeval *);
 extern void inc_hw_errors(struct thr_info *thr);
+extern void inc_dev_status(int max_fan, int max_temp);
+extern void inc_work_stats(struct thr_info *thr, struct pool *pool, int diff1);
 extern bool test_nonce(struct work *work, uint32_t nonce);
 extern bool test_nonce_diff(struct work *work, uint32_t nonce, double diff);
 extern bool submit_tested_work(struct thr_info *thr, struct work *work);
@@ -1514,6 +1578,10 @@ extern bool submit_nonce(struct thr_info *thr, struct work *work, uint32_t nonce
 extern bool submit_noffset_nonce(struct thr_info *thr, struct work *work, uint32_t nonce,
 			  int noffset);
 extern int share_work_tdiff(struct cgpu_info *cgpu);
+extern bool submit_nonce_1(struct thr_info *thr, struct work *work, uint32_t nonce, int * nofull);
+extern void submit_nonce_2(struct work *work);
+extern bool submit_nonce_direct(struct thr_info *thr, struct work *work, uint32_t nonce);
+extern bool submit_noffset_nonce(struct thr_info *thr, struct work *work, uint32_t nonce, int noffset);
 extern struct work *get_work(struct thr_info *thr, const int thr_id);
 extern void __add_queued(struct cgpu_info *cgpu, struct work *work);
 extern struct work *get_queued(struct cgpu_info *cgpu);
@@ -1567,6 +1635,7 @@ extern struct work *make_clone(struct work *work);
 extern void clean_work(struct work *work);
 extern void _free_work(struct work **workptr, const char *file, const char *func, const int line);
 #define free_work(WORK) _free_work(&(WORK), __FILE__, __func__, __LINE__)
+#define discard_work(WORK) _discard_work(&(WORK), __FILE__, __func__, __LINE__)
 extern void set_work_ntime(struct work *work, int ntime);
 extern struct work *copy_work_noffset(struct work *base_work, int noffset);
 #define copy_work(work_in) copy_work_noffset(work_in, 0)
@@ -1645,5 +1714,13 @@ extern struct api_data *api_add_avg(struct api_data *root, char *name, float *da
 extern void dupalloc(struct cgpu_info *cgpu, int timelimit);
 extern void dupcounters(struct cgpu_info *cgpu, uint64_t *checked, uint64_t *dups);
 extern bool isdupnonce(struct cgpu_info *cgpu, struct work *work, uint32_t nonce);
+
+extern void cg_logwork(struct work *work, unsigned char *nonce_bin, bool ok);
+extern void cg_logwork_uint32(struct work *work, uint32_t nonce, bool ok);
+
+#if defined(USE_BITMAIN)
+extern void rev(unsigned char *s, size_t l);
+extern int check_asicnum(int asic_num, unsigned char nonce);
+#endif
 
 #endif /* __MINER_H__ */
