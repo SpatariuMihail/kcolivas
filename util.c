@@ -4096,7 +4096,7 @@ void cg_logwork(struct work *work, unsigned char *nonce_bin, bool ok)
                     }
                 }
             }
-        }
+       
         if(szworkdata) free(szworkdata);
         if(szmidstate) free(szmidstate);
         if(szdata) free(szdata);
