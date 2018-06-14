@@ -4060,40 +4060,8 @@ void cg_logwork(struct work *work, unsigned char *nonce_bin, bool ok)
         else
         {
             applog(LOG_ERR, szmsg);
-            if(g_logwork_file)
-            {
-                sprintf(szmsg, "%s %08x work %s midstate %s data %s nonce %s hash %s diff %I64d", ok?"o":"x", work->id, szworkdata, szmidstate, szdata, sznonce5, szhash, worksharediff);
-
-                fwrite(szmsg, strlen(szmsg), 1, g_logwork_file);
-                fwrite("\n", 1, 1, g_logwork_file);
-                fflush(g_logwork_file);
-
-                    if(opt_logwork_diff)
-                    {
-                        int diffnum = 0;
-                        uint64_t difftmp = worksharediff;
-                        while(1)
-                        {
-                            difftmp = difftmp >> 1;
-                            if(difftmp > 0)
-                            {
-                                diffnum++;
-                                if(diffnum >= 64)
-                                {
-                                    break;
-                                }
-                            }
-                            else
-                            {
-                                break;
-                            }
-                        }
-                        applog(LOG_DEBUG, "work diff %I64d diffnum %d", worksharediff, diffnum);
-                        sprintf(szmsg, "midstate %s data %s nonce %s hash %s", szmidstate, szdata, sznonce4, szhash);
-                        fwrite(szmsg, strlen(szmsg), 1, g_logwork_diffs[diffnum]);
-                        fwrite("\n", 1, 1, g_logwork_diffs[diffnum]);
-                        fflush(g_logwork_diffs[diffnum]);
-                    }
+            
+            
                 }
             }
        
