@@ -7571,7 +7571,6 @@ static void copy_pool_stratum(struct pool *pool_stratum, struct pool *pool)
     free(pool_stratum->nonce1);
     free(pool_stratum->coinbase);
 
-    align_len(&coinbase_len);
     pool_stratum->coinbase = calloc(coinbase_len, 1);
     if (unlikely(!pool_stratum->coinbase))
         quit(1, "Failed to calloc pool_stratum coinbase in c5");
