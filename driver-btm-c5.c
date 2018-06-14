@@ -6773,7 +6773,7 @@ int bitmain_c5_init(struct init_config config)
 #endif
 			}
 			
-            jump_to_app_CheckAndRestorePIC(i);
+          //  jump_to_app_CheckAndRestorePIC(i);
 			
             pthread_mutex_unlock(&iic_mutex);
         }
