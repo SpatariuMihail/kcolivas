@@ -435,6 +435,7 @@ char g_miner_type[256] = {0};
 double rolling1, rolling5, rolling15;
 double total_rolling;
 double total_mhashes_done;
+double new_total_mhashes_done;
 char displayed_hash_rate[16] = {0};
 static struct timeval total_tv_start, total_tv_end;
 static struct timeval restart_tv_start, update_tv_start;
@@ -3358,6 +3359,7 @@ double new_total_secs  = 1.0;
 double last_total_secs = 1.0;
 
 static char statusline[256];
+bool re_calc_ghs=false;	// added for re-calculate the AVG hashrate
 /* logstart is where the log window should start */
 static int devcursor, logstart, logcursor;
 #ifdef HAVE_CURSES
