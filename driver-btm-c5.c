@@ -36,15 +36,15 @@
 
 #include "elist.h"
 #include "miner.h"
-#include "usbutils.h"
+//#include "usbutils.h"
 #include "hexdump.c"
 #include "util.h"
 #include "driver-btm-c5.h"
 #include "sha2_c5.h"
 
-#define id_string_len 34
-#define AUTH_URL    "auth.minerlink.com"
-#define PORT        "7000"
+//#define id_string_len 34
+//#define AUTH_URL    "auth.minerlink.com"
+//#define PORT        "7000"
 
 #define USE_IIC 1
 #define TEMP_CALI 0
