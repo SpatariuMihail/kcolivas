@@ -297,7 +297,7 @@ void writeInitLogFile(char *logstr);
 void clearInitLogFile();
 void re_send_last_job();
 
-extern void jump_to_app_CheckAndRestorePIC(int chainIndex); // defined in Clement-bitmain.c
+ // extern void jump_to_app_CheckAndRestorePIC(int chainIndex); // defined in Clement-bitmain.c
 
 static unsigned char last_job_buffer[8192]={23};
 
@@ -3706,7 +3706,7 @@ void do8xPattenTest()
 	}
 
 	set_asic_ticket_mask(0);
-	clement_doTestBoardOnce(true);
+	// clement_doTestBoardOnce(true);
 
 	for(i = 0; i < BITMAIN_MAX_CHAIN_NUM; i++)
 	{
