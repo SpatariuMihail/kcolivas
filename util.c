@@ -4062,16 +4062,10 @@ void cg_logwork(struct work *work, unsigned char *nonce_bin, bool ok)
             applog(LOG_ERR, szmsg);
             
             
-                }
-            }
+        }
+       }
        
-        if(szworkdata) free(szworkdata);
-        if(szmidstate) free(szmidstate);
-        if(szdata) free(szdata);
-        if(sznonce4) free(sznonce4);
-        if(sznonce5) free(sznonce5);
-        if(szhash) free(szhash);
-    }
+        
 }
 
 void cg_logwork_uint32(struct work *work, uint32_t nonce, bool ok)
