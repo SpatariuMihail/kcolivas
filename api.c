@@ -2629,7 +2629,7 @@ static void summary(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __mayb
 {
 	struct api_data *root = NULL;
 	bool io_open;
-	double utility, ghs, work_utility;
+	double utility, ghs, mhs, work_utility;
 
 	message(io_data, MSG_SUMM, 0, NULL, isjson);
 	io_open = io_add(io_data, isjson ? COMSTR JSON_SUMMARY : _SUMMARY COMSTR);
