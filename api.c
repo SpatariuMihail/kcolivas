@@ -3264,6 +3264,7 @@ void dosave(struct io_data *io_data, __maybe_unused SOCKETTYPE c, char *param, b
 static int itemstats(struct io_data *io_data, int i, char *id, struct cgminer_stats *stats, struct cgminer_pool_stats *pool_stats, struct api_data *extra, struct cgpu_info *cgpu, bool isjson)
 {
 	struct api_data *root = NULL;
+	double ghs;
 
 	root = api_add_int(root, "STATS", &i, false);
 	root = api_add_string(root, "ID", id, false);
