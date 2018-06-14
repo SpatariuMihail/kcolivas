@@ -250,6 +250,7 @@ static const char *OSINFO =
 #define _DEVS		"DEVS"
 #define _POOLS		"POOLS"
 #define _SUMMARY	"SUMMARY"
+#define _NONCENUM	"NONCENUM"
 #define _STATUS		"STATUS"
 #define _VERSION	"VERSION"
 #define _MINECONFIG	"CONFIG"
