@@ -7036,7 +7036,7 @@ int bitmain_c5_init(struct init_config config)
 
 		someBoardUpVoltage=false;
 
-		if(!clement_doTestBoard(true))
+		// if(!clement_doTestBoard(true))
 		{
 /*
 #ifndef ENABLE_HIGH_VOLTAGE_OPENCORE	//if use high voltage open core, then we do not do re-init again
