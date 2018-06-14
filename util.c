@@ -4073,17 +4073,17 @@ void cg_logwork(struct work *work, unsigned char *nonce_bin, bool ok)
                     if(g_logwork_asicnum == 1)
                     {
                         sprintf(szmsg, "midstate %s data %s nonce %s hash %s", szmidstate, szdata, sznonce4, szhash);
-                        fwrite(szmsg, strlen(szmsg), 1, g_logwork_files[0]);
-                        fwrite("\n", 1, 1, g_logwork_files[0]);
-                        fflush(g_logwork_files[0]);
+                        fwrite(szmsg, strlen(szmsg), 1, g_logwork_file[0]);
+                        fwrite("\n", 1, 1, g_logwork_file[0]);
+                        fflush(g_logwork_file[0]);
                     }
                     else if(g_logwork_asicnum == 32 || g_logwork_asicnum == 64)
                     {
                         sprintf(szmsg, "midstate %s data %s nonce %s hash %s", szmidstate, szdata, sznonce4, szhash);
                         asicnum = check_asicnum(g_logwork_asicnum, nonce_bin[0]);
-                        fwrite(szmsg, strlen(szmsg), 1, g_logwork_files[asicnum]);
-                        fwrite("\n", 1, 1, g_logwork_files[asicnum]);
-                        fflush(g_logwork_files[asicnum]);
+                        fwrite(szmsg, strlen(szmsg), 1, g_logwork_file[asicnum]);
+                        fwrite("\n", 1, 1, g_logwork_file[asicnum]);
+                        fflush(g_logwork_file[asicnum]);
                     }
 
                     if(opt_logwork_diff)
