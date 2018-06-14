@@ -2629,7 +2629,7 @@ static void summary(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __mayb
 {
 	struct api_data *root = NULL;
 	bool io_open;
-	double utility, mhs, work_utility;
+	double utility, ghs, work_utility;
 
 	message(io_data, MSG_SUMM, 0, NULL, isjson);
 	io_open = io_add(io_data, isjson ? COMSTR JSON_SUMMARY : _SUMMARY COMSTR);
@@ -2640,8 +2640,7 @@ static void summary(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __mayb
 	total_diff1 = total_diff_accepted + total_diff_rejected + total_diff_stale;
 #endif
 	utility = total_accepted / ( total_secs ? total_secs : 1 ) * 60;
-	ghs = getAVGhashrate();
-	mhs = total_mhashes_done / total_secs;
+	ghs = total_mhashes_done / 1000 / total_secs;
 	work_utility = total_diff1 / ( total_secs ? total_secs : 1 ) * 60;
 
 	root = api_add_elapsed(root, "Elapsed", &(total_secs), true);
