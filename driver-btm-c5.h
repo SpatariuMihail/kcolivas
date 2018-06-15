@@ -144,19 +144,7 @@
 #define WR_TEMP_OFFSET_VALUE				0x22
 #define RD_TEMP_OFFSET_VALUE				0x23
 
-//diff freq
-#define PIC_FLASH_POINTER_FREQ_START_ADDRESS_H   0x0F
-#define PIC_FLASH_POINTER_FREQ_START_ADDRESS_L   0xA0
-#define PIC_FLASH_POINTER_FREQ_END_ADDRESS_H     0x0f
-#define PIC_FLASH_POINTER_FREQ_END_ADDRESS_L     0xDF
-#define FREQ_MAGIC								 0x7D
 
-// BAD CORE NUM
-#define PIC_FLASH_POINTER_BADCORE_START_ADDRESS_H   0x0F
-#define PIC_FLASH_POINTER_BADCORE_START_ADDRESS_L   0x80
-#define PIC_FLASH_POINTER_BADCORE_END_ADDRESS_H     0x0f
-#define PIC_FLASH_POINTER_BADCORE_END_ADDRESS_L     0x9F
-#define BADCORE_MAGIC                            0x23	// magic number for bad core num
 
 #define HEART_BEAT_TIME_GAP					10		// 10s
 #define IIC_READ							(1 << 25)
@@ -165,6 +153,8 @@
 #define IIC_ADDR_HIGH_4_BIT					(0x0A << 20)
 #define IIC_CHAIN_NUMBER(x)					((x & 0x0f) << 16)
 #define IIC_REG_ADDR(x)						((x & 0xff) << 8)
+
+
 
 
 //other FPGA macro define
@@ -189,71 +179,9 @@
 #define PHY_MEM_JOB_START_ADDRESS_1		(PHY_MEM_NONCE2_JOBID_ADDRESS + NONCE2_AND_JOBID_STORE_SPACE)
 #define PHY_MEM_JOB_START_ADDRESS_2		(PHY_MEM_JOB_START_ADDRESS_1 + JOB_STORE_SPACE)
 
-
-#undef R4	//if defined, for R4    if not defined for S9
-
-#define ENABLE_HIGH_VOLTAGE_OPENCORE
-#undef ENABLE_REGISTER_CRC_CHECK	//if defined, will drop the register buffer with crc error!
-#define REBOOT_TEST_ONCE_1HOUR	//if defined, will check hashrate after 1 hour, and reboot only once
-#define DISABLE_SHOWX_ENABLE_XTIMES	// if defined, will disable x show on web UI, but will enable x times counter in 1 mins
-
-#ifdef R4
-#define R4_MAX_VOLTAGE		910
-#define FIX_BAUD_VALUE		1
-#define UPRATE_PERCENT		1	// means we need reserved more 1% rate
-
-#define HIGHEST_VOLTAGE_LIMITED_HW		940	//measn the largest voltage, hw can support
-#else
-#define S9_PLUS	// 57 chips, temp asic is 2
-#undef ENABLE_HIGH_VOLTAGE_BUG_FIX	  // S9+ with high voltage, > 9.1V  will has error on read RT hashrate , because of many CRC error!
-#ifdef S9_PLUS
-#define S9_PLUS_12500_VOL_LIMITED		840
-#define S9_PLUS_12000_VOL_LIMITED		850
-#define S9_PLUS_11500_VOL_LIMITED		870
-
-#ifndef ENABLE_HIGH_VOLTAGE_BUG_FIX
-#define S9_PLUS_11000_VOL_LIMITED		890
-#define S9_PLUS_10500_VOL_LIMITED		910
-#define S9_PLUS_10000_VOL_LIMITED		930
-#define S9_PLUS_9500_VOL_LIMITED		960
-#define S9_PLUS_9000_VOL_LIMITED		980
-
-#define S9_PLUS_LOWER_9000_VOL_LIMITED	980
-#define HIGHEST_VOLTAGE_LIMITED_HW		980	//measn the largest voltage, hw can support
-
-#define FIX_BAUD_VALUE		1
-#else
-#define S9_PLUS_11000_VOL_LIMITED		880
-#define S9_PLUS_LOWER_11000_VOL_LIMITED	880
-#define HIGHEST_VOLTAGE_LIMITED_HW		880	//measn the largest voltage, hw can support
-
-#define FIX_BAUD_VALUE		2
-#endif
-
-#define UPRATE_PERCENT		2	// means we need reserved more 2% rate
-#else
-#define S9_14000_VOL_LIMITED		870
-#define S9_13500_VOL_LIMITED		880
-#define S9_13000_VOL_LIMITED		900
-#define S9_12500_VOL_LIMITED		920
-#define S9_12000_VOL_LIMITED		940
-
-#define S9_LOWER_12000_VOL_LIMITED	940
-
-#define FIX_BAUD_VALUE		1
-#define UPRATE_PERCENT		1	// means we need reserved more 1% rate
-
-#define HIGHEST_VOLTAGE_LIMITED_HW		940	//measn the largest voltage, hw can support
-#endif
-#endif
-
 // macro define about miner
 #define BITMAIN_MAX_CHAIN_NUM			16 
-#ifdef S9_PLUS
-#define CHAIN_ASIC_NUM					57
-#else
 #define CHAIN_ASIC_NUM					63
-#endif
 #define BITMAIN_MAX_FAN_NUM				8				// FPGA just can supports 8 fan
 #define BITMAIN_DEFAULT_ASIC_NUM		64				// max support 64 ASIC on 1 HASH board
 #define MIDSTATE_LEN					32
@@ -267,135 +195,37 @@
 #define READ_JOB_TYPE					0xa2
 #define CHECK_SYSTEM_TIME_GAP			10000			// 10s
 //fan
-
-#undef ENABLE_REINIT_MINING	// if defined, will enable hashrate check in mining, and re-init if low hashrate.  
-#undef DEBUG_REINIT	// reinit per 2mins and will not do pre heat patten test
-#undef DEBUG_REBOOT	// reboot every 30mins, for test
-#undef DEBUG_218_FAN_FULLSPEED	//for debug on 218, full speed on fan
-#undef DISABLE_TEMP_PROTECT
-#undef TWO_CHIP_TEMP_S9
-#undef SHOW_BOTTOM_TEMP
-#undef KEEP_TEMPFAN_LOG	// if defined, will not clear old temp fan log info
-#undef HIGH_TEMP_TEST_S9	//if defined, will use 120 degree as the high temp
-#undef CAPTURE_PATTEN
-
-#define CHECK_RT_IDEAL_RATE_PERCENT		85	// RT rate / ideal rate >= 85% will be OK, or need re init
-
-typedef enum {
-	TEMP_POS_LOCAL=0,
-	TEMP_POS_MIDDLE,
-	TEMP_POS_BOTTOM,
-	TEMP_POS_NUM=4,	// always the last one, to identify the number of temp , must 4 bytes alignment
-}TEMP_POSITION;
-
-#ifdef R4
-#define PWM_T 	0	// 0 local temp,  1 middle temp,  2 bottom,  as above!!!
-
-#define MIN_FAN_NUM                     1
-#define MAX_FAN_SPEED                   3000
-#define TEMP_INTERVAL                   2
-#if PWM_T == 1
-#define MIN_PWM_PERCENT                 20
-#define MID_PWM_PERCENT                 60
-#define MAX_PWM_PERCENT                 100
-#define MAX_TEMP                        125
-#define MAX_FAN_TEMP                    110
-#define MID_FAN_TEMP                    90
-#define MIN_FAN_TEMP                    60
-#define MAX_PCB_TEMP					100	//  use middle to control fan, but use pcb temp to check to stop or not!
-#define MAX_FAN_PCB_TEMP				85	//90 use middle to control fan, but use pcb temp to check to stop or not!
-#else
-#define MIN_PWM_PERCENT                 30
-#define MID_PWM_PERCENT                 70
-#define MAX_PWM_PERCENT                 100
-#define MAX_TEMP                        90
-#define MAX_FAN_TEMP                    75
-#define MID_FAN_TEMP                    65
-#define MIN_FAN_TEMP                    25
-#define MAX_PCB_TEMP					90	//  use middle to control fan, but use pcb temp to check to stop or not!
-#endif
-#define TEMP_INTERVAL					2
-
-#define MID_PWM_ADJUST_FACTOR           ((MAX_PWM_PERCENT-MID_PWM_PERCENT)/(MAX_FAN_TEMP-MID_FAN_TEMP))
-#define PWM_ADJUST_FACTOR               ((MID_PWM_PERCENT-MIN_PWM_PERCENT)/(MID_FAN_TEMP-MIN_FAN_TEMP))
-#else		
-// below is for S9
-#define PWM_T 	1	// 0 local temp,  1 middle temp,  2 bottom,  as above!!!
-
 #define MIN_FAN_NUM						2
 #define MAX_FAN_SPEED					6000
-#if PWM_T == 1
-#define MIN_PWM_PERCENT                 0
-#define MAX_PWM_PERCENT                 100
-
-#ifdef HIGH_TEMP_TEST_S9
-#define MAX_TEMP                        135	//125     135      145          release:135
-#define MAX_FAN_TEMP                    120	// 115    125      135          release:120
-#define MIN_FAN_TEMP                    70	//65       75        85            release:70
-#define MAX_PCB_TEMP					105	//100       105      110        release:105
-#define MAX_FAN_PCB_TEMP				95	//95       100        105        release:95
-#else
-#ifdef TWO_CHIP_TEMP_S9
-#define MAX_TEMP                        135	//125     135      145          release:135
-#define MAX_FAN_TEMP                    120	// 115    125      135          release:120
-#define MIN_FAN_TEMP                    70	//65       75        85            release:70
-#define MAX_PCB_TEMP					105	//100       105      110        release:105
-#define MAX_FAN_PCB_TEMP				95	//95       100        105        release:95
-#else
-#define MAX_TEMP                        125	//125     135      145          release:125
-#define MAX_FAN_TEMP                    110	// 115    125      135          release:115
-#define MIN_FAN_TEMP                    60	//65       75        85            release:65
-#define MAX_PCB_TEMP					95	//100       105      110        release:95
-#define MAX_FAN_PCB_TEMP				85	//95       100        105        release:85
-#endif
-#endif
-#else
 #define MIN_PWM_PERCENT					20
 #define MAX_PWM_PERCENT					100
-#define MAX_TEMP                        90
-#define MAX_FAN_TEMP                    75
-#define MIN_FAN_TEMP                    35
-#define MAX_PCB_TEMP					90	//  use middle to control fan, but use pcb temp to check to stop or not!
-#endif
-#define TEMP_INTERVAL					2
-#define PWM_ADJUST_FACTOR               ((MAX_PWM_PERCENT-MIN_PWM_PERCENT)/(MAX_FAN_TEMP-MIN_FAN_TEMP))
-#endif
+#define TEMP_INTERVAL					2	
+#define MAX_TEMP						85
+#define MAX_FAN_TEMP 					75
+#define MIN_FAN_TEMP 					35
+#define HAVE_TEMP 						0xF4
 
-#ifdef HIGH_TEMP_TEST_S9
-#define MIN_TEMP_CONTINUE_DOWN_FAN		110	// release: 90
-#define MAX_TEMP_NEED_UP_FANSTEP		120	// release: 100   if temp is higher than 100, then we need make fan much faster
-#else
-#define MIN_TEMP_CONTINUE_DOWN_FAN		90	// release: 90
-#define MAX_TEMP_NEED_UP_FANSTEP		100	// release: 100   if temp is higher than 100, then we need make fan much faster
-#endif
-
+#define PWM_ADJUST_FACTOR				((100 - MIN_PWM_PERCENT)/(MAX_FAN_TEMP-MIN_FAN_TEMP))	
 #define PWM_SCALE						50	
 #define PWM_ADJ_SCALE					9/10
 //use for hash test
 #define TEST_DHASH 0
 #define DEVICE_DIFF 8
 //use for status check
+//#define XILINX
+#define C5
 
-#define MAX_TEMPCHIP_NUM	8	// support 8 chip has temp
-
-#define MIN_FREQ	4	// 8:300M	6:250M		4:200M
-#define MAX_FREQ	100	//850M
-#define MAX_SW_TEMP_OFFSET		-15
-#define BMMINER_VERSION		3	// 3 for auto freq,  1 or 2 for normal ( the old version is 0)
-
-// for c5, bmminer will detect board type and use it.
-#define RED_LED_DEV_C5 "/sys/class/leds/hps_led2/brightness"
-#define GREEN_LED_DEV_C5 "/sys/class/leds/hps_led0/brightness"
-
-// for xilinx, bmminer will detect board type and use it.
-#define RED_LED_DEV_XILINX "/sys/class/gpio/gpio37/value"
-#define GREEN_LED_DEV_XILINX "/sys/class/gpio/gpio38/value"
+#ifdef C5
+#define RED_LED_DEV "/sys/class/leds/hps_led2/brightness"
+#define GREEN_LED_DEV "/sys/class/leds/hps_led0/brightness"
+#else ifdef XILINX
+#define RED_LED_DEV "/sys/class/gpio/gpio37/value"
+#define GREEN_LED_DEV "/sys/class/gpio/gpio38/value"
+#endif
 
 
-#define TIMESLICE 60
 
-struct init_config
-{
+struct init_config {
 	uint8_t 	token_type;
 	uint8_t 	version;
 	uint16_t	length;
@@ -528,12 +358,7 @@ struct all_parameters {
 	unsigned int	nonce_error;
 	unsigned int	chain_asic_exist[BITMAIN_MAX_CHAIN_NUM][8];
 	unsigned int	chain_asic_status[BITMAIN_MAX_CHAIN_NUM][8];
-	signed char		chain_asic_temp_num[BITMAIN_MAX_CHAIN_NUM];	// the real number of temp chip
-	unsigned char	TempChipType[BITMAIN_MAX_CHAIN_NUM][MAX_TEMPCHIP_NUM];
-	unsigned char	TempChipAddr[BITMAIN_MAX_CHAIN_NUM][MAX_TEMPCHIP_NUM];	// each temp chip's address: chip index*4, index start from 0
-	int16_t			chain_asic_temp[BITMAIN_MAX_CHAIN_NUM][MAX_TEMPCHIP_NUM][TEMP_POS_NUM];	// 4 kinds of temp
-	int16_t			chain_asic_maxtemp[BITMAIN_MAX_CHAIN_NUM][TEMP_POS_NUM];	// 4 kinds of temp
-	int16_t			chain_asic_mintemp[BITMAIN_MAX_CHAIN_NUM][TEMP_POS_NUM];	// 4 kinds of temp
+	int16_t			chain_asic_temp[BITMAIN_MAX_CHAIN_NUM][8][4];
 	int8_t			chain_asic_iic[CHAIN_ASIC_NUM];
 	uint32_t		chain_hw[BITMAIN_MAX_CHAIN_NUM];
 	uint64_t		chain_asic_nonce[BITMAIN_MAX_CHAIN_NUM][BITMAIN_DEFAULT_ASIC_NUM];
@@ -551,8 +376,7 @@ struct all_parameters {
 	unsigned char	fan_num;
 	unsigned char	temp_num;
 	unsigned int	fan_speed_top1;
-	int				temp_top1[TEMP_POS_NUM];
-	int				temp_low1[TEMP_POS_NUM];
+	int				temp_top1;
 	int				temp_top1_last;
 	unsigned char	corenum;
 	unsigned char	addrInterval;
@@ -567,9 +391,7 @@ struct all_parameters {
 	unsigned short int	freq[BITMAIN_MAX_CHAIN_NUM];
 } __attribute__((packed, aligned(4)));
 
-
-
-struct nonce_buf {
+volatile struct nonce_buf {
 	unsigned int p_wr;
 	unsigned int p_rd;
 	unsigned int nonce_num;
@@ -582,7 +404,7 @@ struct reg_content {
 	unsigned char chain_number;
 } __attribute__((packed, aligned(4)));
 
-struct reg_buf {
+volatile struct reg_buf {
 	unsigned int p_wr;
 	unsigned int p_rd;
 	unsigned int reg_value_num;
@@ -623,120 +445,106 @@ struct vil_work_1387
 
 
 static struct freq_pll freq_pll_1385[] = {
-  	{"100",0x020040, 0x0420, 0x200241},
-  	{"125",0x028040, 0x0420, 0x280241},
-  	{"150",0x030040, 0x0420, 0x300241},
-  	{"175",0x038040, 0x0420, 0x380241},
-  	{"200",0x040040, 0x0420, 0x400241},
-  	{"225",0x048040, 0x0420, 0x480241},
-  	{"250",0x050040, 0x0420, 0x500241},
-  	{"275",0x058040, 0x0420, 0x580241},
-	  {"300",0x060040, 0x0420, 0x600241},
-  	{"325",0x068040, 0x0420, 0x680241},
-  	{"350",0x070040, 0x0420, 0x700241},
-  	{"375",0x078040, 0x0420, 0x780241},
-  	{"400",0x080040, 0x0420, 0x800241},
-  	{"404",0x061040, 0x0320, 0x610231},
-  	{"406",0x041040, 0x0220, 0x410221},
-  	{"408",0x062040, 0x0320, 0x620231},
-  	{"412",0x042040, 0x0220, 0x420221},
-  	{"416",0x064040, 0x0320, 0x640231},
-  	{"418",0x043040, 0x0220, 0x430221},
-  	{"420",0x065040, 0x0320, 0x650231},
-  	{"425",0x044040, 0x0220, 0x440221},
-  	{"429",0x067040, 0x0320, 0x670231},
-  	{"431",0x045040, 0x0220, 0x450221},
-  	{"433",0x068040, 0x0320, 0x680231},
-  	{"437",0x046040, 0x0220, 0x460221},
-  	{"441",0x06a040, 0x0320, 0x6a0231},
-  	{"443",0x047040, 0x0220, 0x470221},
-  	{"445",0x06b040, 0x0320, 0x6b0231},
-  	{"450",0x048040, 0x0220, 0x480221},
-  	{"454",0x06d040, 0x0320, 0x6d0231},
-  	{"456",0x049040, 0x0220, 0x490221},
-  	{"458",0x06e040, 0x0320, 0x6e0231},
-  	{"462",0x04a040, 0x0220, 0x4a0221},
-  	{"466",0x070040, 0x0320, 0x700231},
-  	{"468",0x04b040, 0x0220, 0x4b0221},
-  	{"470",0x071040, 0x0320, 0x710231},
-  	{"475",0x04c040, 0x0220, 0x4c0221},
-  	{"479",0x073040, 0x0320, 0x730231},
-  	{"481",0x04d040, 0x0220, 0x4d0221},
-  	{"483",0x074040, 0x0320, 0x740231},
-	  {"487",0x04e040, 0x0220, 0x4e0221},
-  	{"491",0x076040, 0x0320, 0x760231},
-  	{"493",0x04f040, 0x0220, 0x4f0221},
-  	{"495",0x077040, 0x0320, 0x770231},
-  	{"500",0x050040, 0x0220, 0x500221},
-  	{"504",0x079040, 0x0320, 0x790231},
-  	{"506",0x051040, 0x0220, 0x510221},
-  	{"508",0x07a040, 0x0320, 0x7a0231},
-  	{"512",0x052040, 0x0220, 0x520221},
-  	{"516",0x07c040, 0x0320, 0x7c0231},
-  	{"518",0x053040, 0x0220, 0x530221},
-  	{"520",0x07d040, 0x0320, 0x7d0231},
-  	{"525",0x054040, 0x0220, 0x540221},
-  	{"529",0x07f040, 0x0320, 0x7f0231},
-  	{"531",0x055040, 0x0220, 0x550221},
-  	{"533",0x080040, 0x0320, 0x800231},
-  	{"537",0x056040, 0x0220, 0x560221},
-  	{"543",0x057040, 0x0220, 0x570221},
-  	{"550",0x058040, 0x0220, 0x580221},
-	  {"556",0x059040, 0x0220, 0x590221},
-  	{"562",0x05a040, 0x0220, 0x5a0221},
-  	{"568",0x05b040, 0x0220, 0x5b0221},
-  	{"575",0x05c040, 0x0220, 0x5c0221},
-  	{"581",0x05d040, 0x0220, 0x5d0221},
-  	{"587",0x05e040, 0x0220, 0x5e0221},
-  	{"593",0x05f040, 0x0220, 0x5f0221},
-  	{"600",0x060040, 0x0220, 0x600221},
-  	{"606",0x061040, 0x0220, 0x610221},
-  	{"612",0x062040, 0x0220, 0x620221},
-  	{"618",0x063040, 0x0220, 0x630221},
-  	{"625",0x064040, 0x0220, 0x640221},
-  	{"631",0x065040, 0x0220, 0x650221},
-	  {"637",0x066040, 0x0220, 0x660221},
-	  {"643",0x067040, 0x0220, 0x670221},
-  	{"650",0x068040, 0x0220, 0x680221},
-  	{"656",0x069040, 0x0220, 0x690221},
-  	{"662",0x06a040, 0x0220, 0x6a0221},
-  	{"668",0x06b040, 0x0220, 0x6b0221},
-  	{"675",0x06c040, 0x0220, 0x6c0221},
-  	{"681",0x06d040, 0x0220, 0x6d0221},
-  	{"687",0x06e040, 0x0220, 0x6e0221},
-  	{"693",0x06f040, 0x0220, 0x6f0221},
-  	{"700",0x070040, 0x0220, 0x700221},
-  	{"706",0x071040, 0x0220, 0x710221},
-  	{"712",0x072040, 0x0220, 0x720221},
-  	{"718",0x073040, 0x0220, 0x730221},
-  	{"725",0x074040, 0x0220, 0x740221},
-  	{"731",0x075040, 0x0220, 0x750221},
-  	{"737",0x076040, 0x0220, 0x760221},
-  	{"743",0x077040, 0x0220, 0x770221},
-  	{"750",0x078040, 0x0220, 0x780221},
-  	{"756",0x079040, 0x0220, 0x790221},
-  	{"762",0x07a040, 0x0220, 0x7a0221},
-  	{"768",0x07b040, 0x0220, 0x7b0221}, 
-  	{"775",0x07c040, 0x0220, 0x7c0221},
-  	{"781",0x07d040, 0x0220, 0x7d0221},
-	  {"787",0x07e040, 0x0220, 0x7e0221},
-  	{"793",0x07f040, 0x0220, 0x7f0221},
-  	{"800",0x080040, 0x0220, 0x800221},
-  	{"825",0x042040, 0x0120, 0x420211},
-    {"850",0x044040, 0x0120, 0x440211},
-    {"875",0x046040, 0x0120, 0x460211},
-    {"900",0x048040, 0x0120, 0x480211},
-    {"925",0x04a040, 0x0120, 0x4a0211},
-    {"950",0x04c040, 0x0120, 0x4c0211},
-    {"975",0x04e040, 0x0120, 0x4e0211},
-    {"1000",0x050040, 0x0120, 0x500211},
-    {"1025",0x052040, 0x0120, 0x520211},
-    {"1050",0x054040, 0x0120, 0x540211},
-    {"1075",0x056040, 0x0120, 0x560211},
-    {"1100",0x058040, 0x0120, 0x580211},
-    {"1125",0x05a040, 0x0120, 0x5a0211},
-    {"1150",0x05c040, 0x0120, 0x5c0211},
-    {"1175",0x05e040, 0x0120, 0x5e0211},
+	{"100",0x020040, 0x0420, 0x200241},
+	{"125",0x028040, 0x0420, 0x280241},
+	{"150",0x030040, 0x0420, 0x300241},
+	{"175",0x038040, 0x0420, 0x380241},
+	{"200",0x040040, 0x0420, 0x400241},
+	{"225",0x048040, 0x0420, 0x480241},
+	{"250",0x050040, 0x0420, 0x500241},
+	{"275",0x058040, 0x0420, 0x580241},
+	{"300",0x060040, 0x0420, 0x600241},
+	{"325",0x068040, 0x0420, 0x680241},
+	{"350",0x070040, 0x0420, 0x700241},
+	{"375",0x078040, 0x0420, 0x780241},
+	{"400",0x080040, 0x0420, 0x800241},
+	{"404",0x061040, 0x0320, 0x610231},
+	{"406",0x041040, 0x0220, 0x410221},
+	{"408",0x062040, 0x0320, 0x620231},
+	{"412",0x042040, 0x0220, 0x420221},
+	{"416",0x064040, 0x0320, 0x640231},
+	{"418",0x043040, 0x0220, 0x430221},
+	{"420",0x065040, 0x0320, 0x650231},
+	{"425",0x044040, 0x0220, 0x440221},
+	{"429",0x067040, 0x0320, 0x670231},
+	{"431",0x045040, 0x0220, 0x450221},
+	{"433",0x068040, 0x0320, 0x680231},
+	{"437",0x046040, 0x0220, 0x460221},
+	{"441",0x06a040, 0x0320, 0x6a0231},
+	{"443",0x047040, 0x0220, 0x470221},
+	{"445",0x06b040, 0x0320, 0x6b0231},
+	{"450",0x048040, 0x0220, 0x480221},
+	{"454",0x06d040, 0x0320, 0x6d0231},
+	{"456",0x049040, 0x0220, 0x490221},
+	{"458",0x06e040, 0x0320, 0x6e0231},
+	{"462",0x04a040, 0x0220, 0x4a0221},
+	{"466",0x070040, 0x0320, 0x700231},
+	{"468",0x04b040, 0x0220, 0x4b0221},
+	{"470",0x071040, 0x0320, 0x710231},
+	{"475",0x04c040, 0x0220, 0x4c0221},
+	{"479",0x073040, 0x0320, 0x730231},
+	{"481",0x04d040, 0x0220, 0x4d0221},
+	{"483",0x074040, 0x0320, 0x740231},
+	{"487",0x04e040, 0x0220, 0x4e0221},
+	{"491",0x076040, 0x0320, 0x760231},
+	{"493",0x04f040, 0x0220, 0x4f0221},
+	{"495",0x077040, 0x0320, 0x770231},
+	{"500",0x050040, 0x0220, 0x500221},
+	{"504",0x079040, 0x0320, 0x790231},
+	{"506",0x051040, 0x0220, 0x510221},
+	{"508",0x07a040, 0x0320, 0x7a0231},
+	{"512",0x052040, 0x0220, 0x520221},
+	{"516",0x07c040, 0x0320, 0x7c0231},
+	{"518",0x053040, 0x0220, 0x530221},
+	{"520",0x07d040, 0x0320, 0x7d0231},
+	{"525",0x054040, 0x0220, 0x540221},
+	{"529",0x07f040, 0x0320, 0x7f0231},
+	{"531",0x055040, 0x0220, 0x550221},
+	{"533",0x080040, 0x0320, 0x800231},
+	{"537",0x056040, 0x0220, 0x560221},
+	{"543",0x057040, 0x0220, 0x570221},
+	{"550",0x058040, 0x0220, 0x580221},
+	{"556",0x059040, 0x0220, 0x590221},
+	{"562",0x05a040, 0x0220, 0x5a0221},
+	{"568",0x05b040, 0x0220, 0x5b0221},
+	{"575",0x05c040, 0x0220, 0x5c0221},
+	{"581",0x05d040, 0x0220, 0x5d0221},
+	{"587",0x05e040, 0x0220, 0x5e0221},
+	{"593",0x05f040, 0x0220, 0x5f0221},
+	{"600",0x060040, 0x0220, 0x600221},
+	{"606",0x061040, 0x0220, 0x610221},
+	{"612",0x062040, 0x0220, 0x620221},
+	{"618",0x063040, 0x0220, 0x630221},
+	{"625",0x064040, 0x0220, 0x640221},
+	{"631",0x065040, 0x0220, 0x650221},
+	{"637",0x066040, 0x0220, 0x660221},
+	{"643",0x067040, 0x0220, 0x670221},
+	{"650",0x068040, 0x0220, 0x680221},
+	{"656",0x069040, 0x0220, 0x690221},
+	{"662",0x06a040, 0x0220, 0x6a0221},
+	{"668",0x06b040, 0x0220, 0x6b0221},
+	{"675",0x06c040, 0x0220, 0x6c0221},
+	{"681",0x06d040, 0x0220, 0x6d0221},
+	{"687",0x06e040, 0x0220, 0x6e0221},
+	{"693",0x06f040, 0x0220, 0x6f0221},
+	{"700",0x070040, 0x0220, 0x700221},
+	{"706",0x071040, 0x0220, 0x710221},
+	{"712",0x072040, 0x0220, 0x720221},
+	{"718",0x073040, 0x0220, 0x730221},
+	{"725",0x074040, 0x0220, 0x740221},
+	{"731",0x075040, 0x0220, 0x750221},
+	{"737",0x076040, 0x0220, 0x760221},
+	{"743",0x077040, 0x0220, 0x770221},
+	{"750",0x078040, 0x0220, 0x780221},
+	{"756",0x079040, 0x0220, 0x790221},
+	{"762",0x07a040, 0x0220, 0x7a0221},
+	{"768",0x07b040, 0x0220, 0x7b0221},
+	{"775",0x07c040, 0x0220, 0x7c0221},
+	{"781",0x07d040, 0x0220, 0x7d0221},
+	{"787",0x07e040, 0x0220, 0x7e0221},
+	{"793",0x07f040, 0x0220, 0x7f0221},
+	{"800",0x080040, 0x0220, 0x800221},
+	{"825",0x042040, 0x0120, 0x420211},
 };
 
 extern bool opt_bitmain_fan_ctrl;
@@ -749,3 +557,4 @@ extern int ADD_FREQ1;
 
 
 #endif
+
