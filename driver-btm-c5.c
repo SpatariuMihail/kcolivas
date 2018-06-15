@@ -3263,7 +3263,7 @@ void get_hash_rate()
     }
 }
 
-void get_nonce_and_register(void)
+void * get_nonce_and_register()
 {
     unsigned int work_id=0, *data_addr=NULL;
     unsigned int i=0, j=0, m=0, nonce_number = 0, read_loop=0;
