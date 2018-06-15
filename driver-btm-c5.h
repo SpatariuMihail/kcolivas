@@ -212,7 +212,7 @@
 #define TEST_DHASH 0
 #define DEVICE_DIFF 8
 //use for status check
-//#define XILINX
+#define XILINX
 #define C5
 
 #ifdef C5
