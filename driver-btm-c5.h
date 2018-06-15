@@ -391,20 +391,23 @@ struct all_parameters {
 	unsigned short int	freq[BITMAIN_MAX_CHAIN_NUM];
 } __attribute__((packed, aligned(4)));
 
-volatile struct nonce_buf {
+volatile struct nonce_buf 
+{
 	unsigned int p_wr;
 	unsigned int p_rd;
 	unsigned int nonce_num;
 	struct nonce_content nonce_buffer[MAX_NONCE_NUMBER_IN_FIFO];
 } __attribute__((packed, aligned(4)));
 
-struct reg_content {
+struct reg_content 
+{
 	unsigned int reg_value;
 	unsigned char crc;
 	unsigned char chain_number;
 } __attribute__((packed, aligned(4)));
 
-volatile struct reg_buf {
+volatile struct reg_buf 
+{
 	unsigned int p_wr;
 	unsigned int p_rd;
 	unsigned int reg_value_num;
