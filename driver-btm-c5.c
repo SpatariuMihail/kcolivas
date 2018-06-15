@@ -35,7 +35,7 @@
 
 #include "elist.h"
 #include "miner.h"
-#include "usbutils.h"
+//#include "usbutils.h"
 #include "hexdump.c"
 #include "util.h"
 #include "driver-btm-c5.h"
