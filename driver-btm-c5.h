@@ -218,7 +218,8 @@
 #ifdef C5
 #define RED_LED_DEV "/sys/class/leds/hps_led2/brightness"
 #define GREEN_LED_DEV "/sys/class/leds/hps_led0/brightness"
-#else ifdef XILINX
+#endif
+#ifdef XILINX
 #define RED_LED_DEV "/sys/class/gpio/gpio37/value"
 #define GREEN_LED_DEV "/sys/class/gpio/gpio38/value"
 #endif
