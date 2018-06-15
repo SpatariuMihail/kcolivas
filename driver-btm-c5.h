@@ -396,7 +396,7 @@ volatile struct nonce_buf {
 	unsigned int p_rd;
 	unsigned int nonce_num;
 	struct nonce_content nonce_buffer[MAX_NONCE_NUMBER_IN_FIFO];
-}__attribute__((packed, aligned(4)));
+} __attribute__((packed, aligned(4)));
 
 struct reg_content {
 	unsigned int reg_value;
@@ -409,7 +409,7 @@ volatile struct reg_buf {
 	unsigned int p_rd;
 	unsigned int reg_value_num;
 	struct reg_content reg_buffer[MAX_NONCE_NUMBER_IN_FIFO];
-}__attribute__((packed, aligned(4)));
+} __attribute__((packed, aligned(4)));
 
 struct freq_pll
 {
