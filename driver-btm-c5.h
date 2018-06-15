@@ -212,13 +212,13 @@
 #define TEST_DHASH 0
 #define DEVICE_DIFF 8
 //use for status check
-#define XILINX
+//#define XILINX
 #define C5
 
 #ifdef C5
 #define RED_LED_DEV "/sys/class/leds/hps_led2/brightness"
 #define GREEN_LED_DEV "/sys/class/leds/hps_led0/brightness"
-#else ifndef XILINX
+#else
 #define RED_LED_DEV "/sys/class/gpio/gpio37/value"
 #define GREEN_LED_DEV "/sys/class/gpio/gpio38/value"
 #endif
