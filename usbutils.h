@@ -11,7 +11,7 @@
 #ifndef USBUTILS_H
 #define USBUTILS_H
 
-#include <libusb.h>
+#include <usb.h>
 
 #include "util.h"
 
