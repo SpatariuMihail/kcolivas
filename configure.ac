@@ -69,6 +69,7 @@ WS2_LIBS=""
 MM_LIBS=""
 MATH_LIBS="-lm"
 RT_LIBS="-lrt"
+EXTRA_LIBS="-lz"
 
 case $target in
   amd64-*)
@@ -93,6 +94,7 @@ case $target in
     WS2_LIBS="-lws2_32"
     MM_LIBS="-lwinmm"
     RT_LIBS=""
+    EXTRA_LIBS="-lz"
     #AC_DEFINE([_WIN32_WINNT], [0x0501], "WinNT version for XP+ support")
     ;;
   powerpc-*-darwin*)
