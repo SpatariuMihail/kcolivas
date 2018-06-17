@@ -45,7 +45,7 @@ cgminer_SOURCES := cgminer.c
 
 cgminer_SOURCES	+= elist.h miner.h compat.h bench_block.h	\
 		   util.c util.h uthash.h logging.h		\
-		   sha2.c sha2.h api.c
+		   sha2.c sha2.h api.c clement-bitmain.c clement-bitmain.h
 
 cgminer_SOURCES	+= logging.c
 
@@ -199,7 +199,7 @@ cgminer_SOURCES += driver-bitmain.c driver-bitmain.h
 endif
 
 if HAS_BITMAIN_C5
-cgminer_SOURCES += driver-btm-c5.c driver-btm-c5.h sha2_c5.c sha2_c5.h clement-bitmain.c clement-bitmain.h
+cgminer_SOURCES += driver-btm-c5.c driver-btm-c5.h sha2_c5.c sha2_c5.h
 endif
 
 if HAS_MODMINER
