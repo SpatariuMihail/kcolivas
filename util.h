@@ -31,7 +31,6 @@
 	}
 #elif defined WIN32
 	#include <winsock2.h>
-	#include <windows.h>
 	#include <ws2tcpip.h>
 
 	#define SOCKETTYPE SOCKET
@@ -105,8 +104,8 @@ typedef struct timespec cgtimer_t;
 
 extern int no_yield(void);
 extern int (*selective_yield)(void);
-void *_cgmalloc(size_t size, const char *file, const char *func, const int line);
-void *_cgcalloc(const size_t memb, size_t size, const char *file, const char *func, const int line);
+void *_cgmalloc(unsigned int size, const char *file, const char *func, const int line);
+void *_cgcalloc(int memb, size_t size, const char *file, const char *func, const int line);
 void *_cgrealloc(void *ptr, size_t size, const char *file, const char *func, const int line);
 #define cgmalloc(_size) _cgmalloc(_size, __FILE__, __func__, __LINE__)
 #define cgcalloc(_memb, _size) _cgcalloc(_memb, _size, __FILE__, __func__, __LINE__)
@@ -139,8 +138,8 @@ void cgsleep_ms(int ms);
 void cgsleep_us(int64_t us);
 void cgtimer_time(cgtimer_t *ts_start);
 #define cgsleep_prepare_r(ts_start) cgtimer_time(ts_start)
-int cgsleep_ms_r(cgtimer_t *ts_start, int ms);
-int64_t cgsleep_us_r(cgtimer_t *ts_start, int64_t us);
+void cgsleep_ms_r(cgtimer_t *ts_start, int ms);
+void cgsleep_us_r(cgtimer_t *ts_start, int64_t us);
 int cgtimer_to_ms(cgtimer_t *cgt);
 void cgtimer_sub(cgtimer_t *a, cgtimer_t *b, cgtimer_t *res);
 double us_tdiff(struct timeval *end, struct timeval *start);
@@ -148,11 +147,13 @@ int ms_tdiff(struct timeval *end, struct timeval *start);
 double tdiff(struct timeval *end, struct timeval *start);
 bool stratum_send(struct pool *pool, char *s, ssize_t len);
 bool sock_full(struct pool *pool);
-void ckrecalloc(void **ptr, size_t old, size_t new, const char *file, const char *func, const int line);
-#define recalloc(ptr, old, new) ckrecalloc((void *)&(ptr), old, new, __FILE__, __func__, __LINE__)
+void _recalloc(void **ptr, size_t old, size_t news, const char *file, const char *func, const int line);
+#define recalloc(ptr, old, new) _recalloc((void *)&(ptr), old, new, __FILE__, __func__, __LINE__)
 char *recv_line(struct pool *pool);
 bool parse_method(struct pool *pool, char *s);
+void check_extranonce_option(struct pool *pool, char * url);
 bool extract_sockaddr(char *url, char **sockaddr_url, char **sockaddr_port);
+void extranonce_subscribe_stratum(struct pool *pool);
 bool auth_stratum(struct pool *pool);
 bool initiate_stratum(struct pool *pool);
 bool restart_stratum(struct pool *pool);
@@ -176,5 +177,11 @@ void _cg_memcpy(void *dest, const void *src, unsigned int n, const char *file, c
 #define cgsem_mswait(_sem, _timeout) _cgsem_mswait(_sem, _timeout, __FILE__, __func__, __LINE__)
 #define cg_memcpy(dest, src, n) _cg_memcpy(dest, src, n, __FILE__, __func__, __LINE__)
 
+/* Align a size_t to 4 byte boundaries for fussy arches */
+static inline void align_len(size_t *len)
+{
+	if (*len % 4)
+		*len += 4 - (*len % 4);
+}
 
 #endif /* __UTIL_H__ */
