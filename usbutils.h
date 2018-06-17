@@ -150,6 +150,7 @@ enum sub_ident {
 	IDENT_ANT,
 	IDENT_ANU,
 	IDENT_BMM,
+	IDENT_BC5,
 	IDENT_BMS,
 	IDENT_AS3,
 	IDENT_AU3,
