@@ -9,7 +9,6 @@
  */
 #include "config.h"
 #include <assert.h>
-#include <libz.a>
 	 
 #include <limits.h>
 #include <pthread.h>
