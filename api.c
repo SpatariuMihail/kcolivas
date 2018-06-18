@@ -20,6 +20,16 @@
 #include <unistd.h>
 #include <limits.h>
 #include <sys/types.h>
+#include <time.h>
+#include <math.h>
+#include <stdarg.h>
+#include <assert.h>
+#include <signal.h>
+#include <limits.h>
+#include <sys/stat.h>
+#include <sys/resource.h>
+#include <ccan/opt/opt.h>
+#include <jansson.h>
 
 #include "compat.h"
 #include "miner.h"
