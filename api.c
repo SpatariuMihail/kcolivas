@@ -28,7 +28,6 @@
 #include <limits.h>
 #include <sys/stat.h>
 #include <sys/resource.h>
-#include <ccan/opt/opt.h>
 #include <jansson.h>
 
 #include "compat.h"
