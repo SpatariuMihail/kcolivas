@@ -10,7 +10,7 @@
 #ifndef KLIST_H
 #define KLIST_H
 
-#include <miner.h>
+#include "miner.h"
 
 #define KLIST_FFL " - from %s %s() line %d"
 #define KLIST_FFL_HERE __FILE__, __func__, __LINE__
