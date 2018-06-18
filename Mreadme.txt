@@ -26,3 +26,5 @@ compiling on linux:
 
 Cross-compiling for Angstrom linux is maybe unneccesary... compiling for armhf can be done on any android device via Linux Deploy - just install Debian -jessie - armhf 
 LinuxDeploy can also add an external mount point (like a folder on your SD card) where you can copy your resulted files.  
+
+Will update here as I go this way...
