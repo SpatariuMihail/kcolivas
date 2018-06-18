@@ -19,7 +19,9 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/syslog.h>
+#include <stdarg.h>
+#include <syslog.h>
+
 #include <sys/param.h>
 
 #include "compat.h"
