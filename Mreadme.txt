@@ -6,9 +6,10 @@ compiling on linux:
 3. cd /home
 4. mkdir develop
 5. cd develop
-6. git clone https://github.com/SpatariuMihail/kcolivas/new/S9-bmm.git
+6. git clone https://github.com/SpatariuMihail/kcolivas/S9-bmm.git
 7. cd kcolivas 
 8. git checkout -b S9-bmm origin/S9-bmm
+git pull
 9. ./autogen.sh
 10. autoconf
 11. automake
