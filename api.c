@@ -42,6 +42,10 @@
 #include "driver-btm-c5.h"
 #endif
 
+#ifdef HAVE_LIBCURL
+#include <curl/curl.h>
+#endif
+
 #if defined(USE_BFLSC) || defined(USE_AVALON) || defined(USE_AVALON2) || defined(USE_AVALON4) || \
   defined(USE_HASHFAST) || defined(USE_BITFURY) || defined(USE_BLOCKERUPTER) || defined(USE_KLONDIKE) || \
     defined(USE_KNC) || defined(USE_BAB) || defined(USE_DRILLBIT) || \
