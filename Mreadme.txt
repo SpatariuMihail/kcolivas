@@ -9,7 +9,7 @@ compiling on linux:
 4. cd /home
 5. mkdir develop
 6. cd develop
-7. git clone hhttps://github.com/SpatariuMihail/kcolivas.git
+7. git clone https://github.com/SpatariuMihail/kcolivas.git
 8. cd kcolivas 
 9. git checkout -b S9-bmm origin/S9-bmm
 10. git pull
