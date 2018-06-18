@@ -18,33 +18,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <unistd.h>
-#include <limits.h>
 #include <sys/types.h>
-#include <time.h>
-#include <math.h>
-#include <stdarg.h>
-#include <assert.h>
-#include <signal.h>
-#include <limits.h>
-#include <sys/stat.h>
-#include <sys/resource.h>
-#include <libgen.h>
-#include <inttypes.h>
-#include "sha2.h"
-#include "compat.h"
-#include "bench_block.h"
+
 #include "compat.h"
 #include "miner.h"
-#include "util.h"
-#include "klist.h"
 
-#ifdef USE_BITMAIN_C5
-#include "driver-btm-c5.h"
-#endif
-
-#ifdef HAVE_LIBCURL
-#include <curl/curl.h>
-#endif
 
 #if defined(USE_BFLSC) || defined(USE_AVALON) || defined(USE_AVALON2) || defined(USE_AVALON4) || \
   defined(USE_HASHFAST) || defined(USE_BITFURY) || defined(USE_BLOCKERUPTER) || defined(USE_KLONDIKE) || \
