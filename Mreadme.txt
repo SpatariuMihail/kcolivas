@@ -12,8 +12,8 @@ compiling on linux:
 7. git clone https://github.com/SpatariuMihail/kcolivas.git
 8. cd kcolivas 
 9. git checkout -b S9-bmm origin/S9-bmm
-10. git pull
-11. ./autogen.sh
+10. git pull 
+11. ./autogen.sh. (if you get "permission denied" then run "chmod 755 *" first)
 12. autoconf
 13. automake
 14. ./configure --enable-bitmain-c5
