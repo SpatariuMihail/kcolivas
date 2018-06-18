@@ -1,4 +1,5 @@
 ATT: the drivers and file were copied directly from bitmaintec bmminer-mix. 
+it compiles ok on Debian Jessie armhf.
 
 
 compiling on linux: 
