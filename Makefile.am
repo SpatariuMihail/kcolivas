@@ -21,7 +21,7 @@ EXTRA_DIST	= example.conf linux-usb-cgminer \
 		  bitstreams/README API-README FPGA-README \
 		  bitforce-firmware-flash.c hexdump.c ASIC-README \
 		  01-cgminer.rules
-EXTRA_LIBS     = -lz
+
 SUBDIRS		= lib compat ccan
 
 cgminer_CPPFLAGS = $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_CPPFLAGS) $(USBUTILS_CPPFLAGS) $(LIBCURL_CPPFLAGS) 
