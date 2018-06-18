@@ -28,3 +28,6 @@ Cross-compiling for Angstrom linux is maybe unneccesary... compiling for armhf c
 LinuxDeploy can also add an external mount point (like a folder on your SD card) where you can copy your resulted files.  
 
 Will update here as I go this way...
+
+
+https://releases.linaro.org/archive/12.11/components/toolchain/binaries/gcc-linaro-arm-linux-gnueabihf-4.7-2012.11-20121123_linux.tar.bz2
