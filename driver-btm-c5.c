@@ -63,8 +63,8 @@ bool startCheckNetworkJob=false;
 
 unsigned char reset_iic_pic(unsigned char chain);
 
-//extern  bool clement_doTestBoard(bool showlog);
-//bool clement_doTestBoardOnce(bool showlog);
+extern  bool clement_doTestBoard(bool showlog);
+bool clement_doTestBoardOnce(bool showlog);
 
 #define hex_print(p) applog(LOG_DEBUG, "%s", p)
 
@@ -6026,7 +6026,7 @@ void set_Hardware_version(unsigned int value)
         }
 
         set_asic_ticket_mask(0);
-        //clement_doTestBoardOnce(true);
+        clement_doTestBoardOnce(true);
 
         for(i = 0; i < BITMAIN_MAX_CHAIN_NUM; i++)
         {
@@ -10901,7 +10901,7 @@ void set_Hardware_version(unsigned int value)
                     }
 
                     someBoardUpVoltage=false;
-                    //test_result=clement_doTestBoard(true);
+                    test_result=clement_doTestBoard(true);
 
 #ifdef ENABLE_REINIT_WHEN_TESTFAILED
                     //if(!test_result)
@@ -10922,7 +10922,7 @@ void set_Hardware_version(unsigned int value)
 
                         doTestPatten=true;
                         pthread_mutex_unlock(&opencore_readtemp_mutex);
-                        //clement_doTestBoard(true);
+                        clement_doTestBoard(true);
                     }
 #endif
 
