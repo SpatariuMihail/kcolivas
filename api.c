@@ -20,6 +20,8 @@
 #include <unistd.h>
 #include <sys/types.h>
 
+#include <sys/param.h>
+
 #include "compat.h"
 #include "miner.h"
 #include "klist.h"
