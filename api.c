@@ -29,7 +29,7 @@
 #include <sys/stat.h>
 #include <sys/resource.h>
 #include <libgen.h>
-
+#include <inttypes.h>
 #include "sha2.h"
 #include "compat.h"
 #include "bench_block.h"
