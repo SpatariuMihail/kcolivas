@@ -6,7 +6,6 @@ set -v
  # @category "Cgminer 4.10.0 for Bitmain Antminer S9"
  # @package "S9 Firmware"
  # @author Miguel Padilla <miguel.padilla@zwilla.de>
- # @author MihaiS
  # @copyright (c) 2016 - Miguel Padilla
  # @link "https://www.mintorro.com"
  #
