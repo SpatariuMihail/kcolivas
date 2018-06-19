@@ -5,7 +5,8 @@ it compiles ok on Debian Jessie armhf.
 compiling on linux: 
  1. apt-get update
  2. apt-get install build-essential git autoconf automake pkg-config libtool libcurl4-openssl-dev libncurses5-dev 
- 3. apt-get install libusb-1.0-0-dev libudev-dev uthash-dev libjansson-dev  zlib1g-dev zlib1g  libc6-dev  dpkg-dev                 
+ 3. apt-get install libusb-1.0-0-dev libudev-dev uthash-dev libjansson-dev  zlib1g-dev zlib1g  libc6-dev  dpkg-dev  
+ ()
 4. cd /home
 5. mkdir develop
 6. cd develop
@@ -31,3 +32,4 @@ Will update here as I go this way...
 
 
 https://releases.linaro.org/archive/12.11/components/toolchain/binaries/gcc-linaro-arm-linux-gnueabihf-4.7-2012.11-20121123_linux.tar.bz2
+apt-get install lib32gcc-4.8-dev gcc-6-multilib
