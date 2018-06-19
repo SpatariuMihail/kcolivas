@@ -33,3 +33,7 @@ Will update here as I go this way...
 
 https://releases.linaro.org/archive/12.11/components/toolchain/binaries/gcc-linaro-arm-linux-gnueabihf-4.7-2012.11-20121123_linux.tar.bz2
 apt-get install lib32gcc-4.8-dev gcc-6-multilib
+
+wget https://releases.linaro.org/archive/12.11/components/toolchain/binaries/gcc-linaro-arm-linux-gnueabihf-4.7-2012.11-20121123_linux.tar.bz2
+tar xjf gcc-linaro-arm-linux-gnueabihf-4.7-2012.11-20121123_linux.tar.bz2
+cp libz.a to a folder for crosscompiling
