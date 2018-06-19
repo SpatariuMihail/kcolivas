@@ -538,13 +538,13 @@ struct CODES
 #endif
     { SEVERITY_SUCC,  MSG_NUMPGA,  PARAM_NONE, "PGA count" },
     { SEVERITY_SUCC,  MSG_NUMASC,  PARAM_NONE, "ASC count" },
-    { SEVERITY_SUCC,  MSG_VERSION, PARAM_NONE, "BMMiner versions" },
+    { SEVERITY_SUCC,  MSG_VERSION, PARAM_NONE, "Cgminer versions" },
     { SEVERITY_ERR,   MSG_INVJSON, PARAM_NONE, "Invalid JSON" },
     { SEVERITY_ERR,   MSG_MISCMD,  PARAM_CMD,  "Missing JSON '%s'" },
     { SEVERITY_ERR,   MSG_MISPID,  PARAM_NONE, "Missing pool id parameter" },
     { SEVERITY_ERR,   MSG_INVPID,  PARAM_POOLMAX,  "Invalid pool id %d - range is 0 - %d" },
     { SEVERITY_SUCC,  MSG_SWITCHP, PARAM_POOL, "Switching to pool %d:'%s'" },
-    { SEVERITY_SUCC,  MSG_MINECONFIG,PARAM_NONE,   "BMMiner config" },
+    { SEVERITY_SUCC,  MSG_MINECONFIG,PARAM_NONE,   "Cgminer config" },
     { SEVERITY_ERR,   MSG_MISFN,   PARAM_NONE, "Missing save filename parameter" },
     { SEVERITY_ERR,   MSG_BADFN,   PARAM_STR,  "Can't open or create save file '%s'" },
     { SEVERITY_SUCC,  MSG_SAVED,   PARAM_STR,  "Configuration saved to file '%s'" },
@@ -566,13 +566,13 @@ struct CODES
     { SEVERITY_SUCC,  MSG_REMPOOL, PARAM_BOTH, "Removed pool %d:'%s'" },
     { SEVERITY_SUCC,  MSG_NOTIFY,  PARAM_NONE, "Notify" },
     { SEVERITY_SUCC,  MSG_DEVDETAILS,PARAM_NONE,   "Device Details" },
-    { SEVERITY_SUCC,  MSG_MINESTATS,PARAM_NONE,    "BMMiner stats" },
+    { SEVERITY_SUCC,  MSG_MINESTATS,PARAM_NONE,    "Cgminer stats" },
     { SEVERITY_ERR,   MSG_MISCHK,  PARAM_NONE, "Missing check cmd" },
     { SEVERITY_SUCC,  MSG_CHECK,   PARAM_NONE, "Check command" },
     { SEVERITY_ERR,   MSG_MISBOOL, PARAM_NONE, "Missing parameter: true/false" },
     { SEVERITY_ERR,   MSG_INVBOOL, PARAM_NONE, "Invalid parameter should be true or false" },
     { SEVERITY_SUCC,  MSG_FOO, PARAM_BOOL, "Failover-Only set to %s" },
-    { SEVERITY_SUCC,  MSG_MINECOIN,PARAM_NONE, "BMMiner coin" },
+    { SEVERITY_SUCC,  MSG_MINECOIN,PARAM_NONE, "Cgminer coin" },
     { SEVERITY_SUCC,  MSG_DEBUGSET,PARAM_NONE, "Debug settings" },
 #ifdef HAVE_AN_FPGA
     { SEVERITY_SUCC,  MSG_PGAIDENT,PARAM_PGA,  "Identify command sent to PGA%d" },
@@ -2020,7 +2020,7 @@ static void apiversion(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __m
     message(io_data, MSG_VERSION, 0, NULL, isjson);
     io_open = io_add(io_data, isjson ? COMSTR JSON_VERSION : _VERSION COMSTR);
 
-    root = api_add_string(root, "BMMiner", VERSION, false);
+    root = api_add_string(root, "Cgminer", VERSION, false);
     root = api_add_const(root, "API", APIVERSION, false);
     root = api_add_string(root, "Miner", g_miner_version, false);
     root = api_add_string(root, "CompileTime", g_miner_compiletime, false);
@@ -3600,7 +3600,7 @@ static void minerstats(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __m
     if (isjson)
         io_open = io_add(io_data, COMSTR JSON_MINESTATS);
 
-    root = api_add_string(root, "BMMiner", VERSION, false);
+    root = api_add_string(root, "Cgminer", VERSION, false);
     root = api_add_string(root, "Miner", g_miner_version, false);
     root = api_add_string(root, "CompileTime", g_miner_compiletime, false);
     root = api_add_string(root, "Type", g_miner_type, false);
