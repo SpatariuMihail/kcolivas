@@ -17,7 +17,7 @@ compiling on linux:
 11. ./autogen.sh. (if you get "permission denied" then run "chmod 755 *" first)
 12. autoconf
 13. automake
-14. ./configure --enable-bitmain-c5 
+14. ./configure --enable-bitmain-c5 --disable-adl --disable-opencl --disable-libcurl.  ? 
 15. make
 16. make api-example
 17. cp api-example cgminer-api
